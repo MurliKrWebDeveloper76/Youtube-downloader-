@@ -157,7 +157,7 @@ def video_info():
             'nocheckcertificate': True,
             'user_agent': BROWSER_HEADERS['User-Agent'],
             'cookiefile': cookies,
-            'no_cache_dir': True, # Important for Vercel
+            'no_cache_dir': True,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -201,7 +201,11 @@ def available_resolutions():
             
             res_set = set()
             for f in formats:
-                if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('ext') == 'mp4':
+                # Strictly look for progressive MP4s (video + audio in one file)
+                # This ensures we don't need ffmpeg for merging on Vercel.
+                if (f.get('vcodec') != 'none' and 
+                    f.get('acodec') != 'none' and 
+                    f.get('ext') == 'mp4'):
                     res = f.get('height')
                     if res:
                         res_set.add(f"{res}p")
@@ -215,6 +219,11 @@ def available_resolutions():
 
 @app.route('/api/download')
 def download():
+    """
+    ULTRA DIRECT PIPE (Progressive Only):
+    Streams binary data directly. Prioritizes single-file MP4s to avoid 
+    ffmpeg dependencies in serverless environments.
+    """
     video_id = request.args.get('id')
     res_req = request.args.get('resolution', '720p')
     format_type = request.args.get('type', 'mp4')
@@ -227,12 +236,16 @@ def download():
     cookies = ensure_cookies()
     
     if format_type == 'mp3':
-        format_spec = 'bestaudio/best'
+        # Best audio available as a single file
+        format_spec = 'bestaudio[ext=m4a]/bestaudio/best'
     else:
-        format_spec = f'best[height<={height}][ext=mp4]/best'
+        # PROGRESSIVE-FIRST SELECTION LOGIC:
+        # 1. Best progressive MP4 with height <= requested
+        # 2. Best progressive MP4 overall
+        # 3. Best overall single file
+        format_spec = f'best[height<={height}][ext=mp4][vcodec!=none][acodec!=none]/best[ext=mp4][vcodec!=none][acodec!=none]/best'
 
     def generate():
-        # --no-cache-dir is critical for serverless
         cmd = [
             sys.executable, "-m", "yt_dlp",
             '-f', format_spec,
@@ -242,7 +255,7 @@ def download():
             '--no-cache-dir',
             '--user-agent', BROWSER_HEADERS['User-Agent'],
             '--cookies', cookies,
-            '-o', '-',  
+            '-o', '-',  # Stream binary to stdout
             video_url
         ]
         
