@@ -10,6 +10,9 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
+# Absolute path to cookies.txt for reliable access in the Vercel environment
+COOKIES_PATH = os.path.join(os.path.dirname(__file__), 'cookies.txt')
+
 # Standard browser headers to mimic a real user session
 BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
@@ -32,12 +35,13 @@ def video_info():
             
         url = data['url']
         
-        # Use the library directly for info extraction (faster & more reliable)
+        # Use the library directly for info extraction
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'nocheckcertificate': True,
             'user_agent': BROWSER_HEADERS['User-Agent'],
+            'cookiefile': COOKIES_PATH, # Engage cookies to bypass bot detection
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -70,6 +74,7 @@ def available_resolutions():
             'quiet': True,
             'nocheckcertificate': True,
             'user_agent': BROWSER_HEADERS['User-Agent'],
+            'cookiefile': COOKIES_PATH,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -93,9 +98,8 @@ def available_resolutions():
 @app.route('/api/download')
 def download():
     """
-    ULTRA DIRECT PIPE (FIXED FOR VERCEL):
-    Uses sys.executable -m yt_dlp to ensure the module is found in the Vercel environment.
-    Streams binary data directly from stdout to the response.
+    ULTRA DIRECT PIPE:
+    Streams binary data directly from stdout to the response using cookies for session persistence.
     """
     video_id = request.args.get('id')
     res_req = request.args.get('resolution', '720p')
@@ -110,11 +114,9 @@ def download():
     if format_type == 'mp3':
         format_spec = 'bestaudio/best'
     else:
-        # Request progressive mp4 to avoid merging (Vercel has no ffmpeg)
         format_spec = f'best[height<={height}][ext=mp4]/best'
 
     def generate():
-        # Using sys.executable -m yt_dlp solves the [Errno 2] error
         cmd = [
             sys.executable, "-m", "yt_dlp",
             '-f', format_spec,
@@ -122,7 +124,8 @@ def download():
             '--no-warnings',
             '--nocheckcertificate',
             '--user-agent', BROWSER_HEADERS['User-Agent'],
-            '-o', '-',  # Stream to stdout
+            '--cookies', COOKIES_PATH, # Added cookies flag
+            '-o', '-',  
             video_url
         ]
         
@@ -130,16 +133,16 @@ def download():
         
         try:
             while True:
-                chunk = proc.stdout.read(1024 * 512) # 512KB chunks
+                chunk = proc.stdout.read(1024 * 512) 
                 if not chunk:
                     break
                 yield chunk
         finally:
             proc.terminate()
 
-    # Get title via library for robustness
     try:
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        ydl_opts = {'quiet': True, 'cookiefile': COOKIES_PATH}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             title = info.get('title', 'video')
     except:
