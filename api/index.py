@@ -1,4 +1,3 @@
-
 import os
 import requests
 import yt_dlp
@@ -8,7 +7,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Standard browser headers to mimic a real user session
+# Mimic a clean browser session to reduce 403 Forbidden errors
 BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -29,14 +28,13 @@ def extract():
             return jsonify({"error": "YouTube URL is required."}), 400
             
         url = data['url']
-        # Optimized opts for fast metadata retrieval
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'format': 'best',
             'nocheckcertificate': True,
             'noplaylist': True,
-            'extract_flat': True, # Faster extraction
+            'extract_flat': True, 
             'user_agent': BROWSER_HEADERS['User-Agent'],
         }
         
@@ -64,8 +62,8 @@ def extract():
 @app.route('/api/download')
 def download():
     """
-    Consolidated download engine.
-    Uses definitive binary headers to force download and avoid in-browser playback.
+    Direct-pipe binary stream.
+    Forces application/octet-stream to bypass browser media players.
     """
     video_id = request.args.get('id')
     format_req = request.args.get('format', 'MP4')
@@ -76,7 +74,7 @@ def download():
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     
     try:
-        # Aggressive performance options for yt-dlp to stay under Vercel's 10s limit
+        # Optimized for speed: fetching pre-merged mp4 streams
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'quiet': True,
@@ -95,13 +93,12 @@ def download():
         if not stream_url:
             raise Exception("No playable stream found")
 
-        # Proxy the stream directly from YouTube
+        # Proxy chunks from YouTube to client
         resp = requests.get(stream_url, stream=True, headers=BROWSER_HEADERS, timeout=10)
         resp.raise_for_status()
 
         def stream_content():
-            # Use 1MB chunks for efficient piping
-            for chunk in resp.iter_content(chunk_size=1048576):
+            for chunk in resp.iter_content(chunk_size=1048576): # 1MB chunks
                 if chunk:
                     yield chunk
 
@@ -109,7 +106,7 @@ def download():
         safe_title = "".join([c for c in title if c.isalnum() or c in ('-', '_')])[:50]
         filename = f"YT_Ultra_{safe_title}.{file_ext}"
 
-        # Headers to force a "Save As" dialog across all browsers
+        # Hardened headers for forced download
         headers = {
             'Content-Type': 'application/octet-stream',
             'Content-Disposition': f'attachment; filename="{filename}"',
@@ -127,7 +124,7 @@ def download():
         return Response(stream_with_context(stream_content()), headers=headers)
 
     except Exception as e:
-        return f"Stream Error: {str(e)}", 500
+        return f"Download server encountered an error: {str(e)}", 500
 
 if __name__ == "__main__":
     app.run(port=5000)

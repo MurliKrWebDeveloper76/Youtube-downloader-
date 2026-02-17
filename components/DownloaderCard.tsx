@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Youtube, Search, Clipboard, Loader2, AlertCircle, Cpu, Database, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
@@ -75,20 +74,21 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   };
 
   const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
-    // Correct endpoint targeting the unified api/index.py
     const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
     
     // Create a hidden anchor to trigger the browser's download manager
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.target = '_self'; // Stay in current page to trigger the 'attachment' header
-    link.setAttribute('download', ''); // Extra hint for the browser
+    link.target = '_self'; 
+    link.setAttribute('download', ''); 
     document.body.appendChild(link);
     link.click();
     
-    // Cleanup and update UI
+    // Cleanup and update UI history
     setTimeout(() => {
-      document.body.removeChild(link);
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
       setIsProcessing(false);
       if (onSuccessRef.current) {
         onSuccessRef.current({
