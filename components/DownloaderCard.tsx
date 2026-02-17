@@ -10,6 +10,11 @@ interface DownloaderCardProps {
   onSuccess: (item: HistoryItem) => void;
 }
 
+interface AvailableResolutions {
+  progressive: string[];
+  audio: string[];
+}
+
 const backendLogs = [
   "[python] Initializing yt-dlp engine...",
   "[network] Connecting to YouTube API...",
@@ -22,6 +27,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
+  const [resolutions, setResolutions] = useState<AvailableResolutions | null>(null);
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -29,8 +35,8 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const [currentFormat, setCurrentFormat] = useState('');
 
   const inputRef = useRef<HTMLInputElement>(null);
-  
   const onSuccessRef = useRef(onSuccess);
+  
   useEffect(() => {
     onSuccessRef.current = onSuccess;
   }, [onSuccess]);
@@ -43,40 +49,46 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const handleProcess = async () => {
     const cleanUrl = url.trim();
     if (!validateUrl(cleanUrl)) {
-      setError('Please provide a valid YouTube link or ID.');
+      setError('Please provide a valid YouTube link.');
       return;
     }
     
     setError('');
     setIsLoading(true);
     setMetadata(null);
+    setResolutions(null);
 
     try {
-      const data = await apiService.extractMetadata(cleanUrl);
+      // Get Info
+      const response = await fetch('/api/video_info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cleanUrl })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to fetch video info');
       setMetadata(data);
+
+      // Get Resolutions
+      const resResponse = await fetch('/api/available_resolutions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cleanUrl })
+      });
+      const resData = await resResponse.json();
+      setResolutions(resData);
+      
     } catch (err: any) {
-      setError(err.message || 'The video extraction failed. Please try a different URL.');
+      setError(err.message || 'Extraction failed. Try another link.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) {
-        setUrl(text);
-        if (validateUrl(text)) setTimeout(handleProcess, 100);
-      }
-    } catch (err) {
-      setError('Clipboard blocked. Please paste manually.');
-    }
-  };
-
-  const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
-    const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
+  const finalizeDownload = useCallback((format: string, res: string, currentMetadata: VideoMetadata) => {
+    const type = format.toLowerCase().includes('mp3') ? 'mp3' : 'mp4';
+    const downloadUrl = `/api/download?id=${currentMetadata.id}&resolution=${res}&type=${type}`;
     
-    // Create a hidden anchor to trigger the browser's download manager silently
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.target = '_self'; 
@@ -85,11 +97,8 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     document.body.appendChild(link);
     link.click();
     
-    // Cleanup and update UI history
     setTimeout(() => {
-      if (document.body.contains(link)) {
-        document.body.removeChild(link);
-      }
+      if (document.body.contains(link)) document.body.removeChild(link);
       setIsProcessing(false);
       if (onSuccessRef.current) {
         onSuccessRef.current({
@@ -97,43 +106,40 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           timestamp: Date.now(),
           title: currentMetadata.title,
           thumbnail: currentMetadata.thumbnailUrl,
-          format: format
+          format: `${type.toUpperCase()} ${res}`
         });
       }
-    }, 1500);
+    }, 2000);
   }, []);
 
-  const handleDownload = (format: string) => {
+  const handleDownload = (format: string, res: string) => {
     if (!metadata) return;
-
-    setCurrentFormat(format);
+    setCurrentFormat(`${format} ${res}`);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Connecting to direct-pipe server..."]);
+    setLogs(["[api] Initializing ultra-speed proxy pipe..."]);
 
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 20) + 15, 100);
-        
-        if (nextProgress % 30 === 0 && logIdx < backendLogs.length) {
+        const next = Math.min(prev + Math.floor(Math.random() * 15) + 10, 100);
+        if (next % 25 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
-
-        if (nextProgress >= 100) {
+        if (next >= 100) {
           clearInterval(interval);
-          finalizeDownload(format, metadata);
+          finalizeDownload(format, res, metadata);
           return 100;
         }
-        return nextProgress;
+        return next;
       });
-    }, 60);
+    }, 100);
   };
 
   return (
     <div id="downloader" className="w-full max-w-4xl mx-auto p-4 md:p-8 space-y-8">
-      <div className="glass rounded-[2.5rem] p-8 md:p-12 shadow-2xl transition-all border border-white/10 dark:hover:border-red-500/20">
+      <div className="glass rounded-[2.5rem] p-8 md:p-12 shadow-2xl border border-white/10">
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -143,7 +149,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div>
                 <h2 className="text-3xl font-black tracking-tight dark:text-white">YT Ultra</h2>
                 <div className="flex items-center gap-2">
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Ultra-Speed Proxy</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Premium Extractor</p>
                   <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
                 </div>
               </div>
@@ -152,7 +158,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Active Proxy
+                Direct Link Active
               </span>
             </div>
           </div>
@@ -165,11 +171,14 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               value={url}
               onChange={(e) => { setUrl(e.target.value); if (error) setError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleProcess()}
-              className="w-full h-18 pl-8 pr-44 rounded-3xl bg-white/40 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-800 focus:border-red-600 dark:focus:border-red-600 outline-none transition-all text-xl font-medium shadow-xl backdrop-blur-md dark:text-white placeholder:text-slate-400"
+              className="w-full h-18 pl-8 pr-12 rounded-3xl bg-white/40 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-800 focus:border-red-600 dark:focus:border-red-600 outline-none transition-all text-xl font-medium shadow-xl backdrop-blur-md dark:text-white"
             />
             <div className="absolute right-3 top-3 bottom-3 flex gap-2">
               <button
-                onClick={handlePaste}
+                onClick={async () => {
+                  const text = await navigator.clipboard.readText();
+                  if (text) { setUrl(text); if (validateUrl(text)) setTimeout(handleProcess, 100); }
+                }}
                 className="flex items-center gap-2 px-6 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-2xl transition-all text-slate-600 dark:text-slate-200 font-bold text-sm"
               >
                 <Clipboard className="w-5 h-5" />
@@ -179,7 +188,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           </div>
 
           {error && (
-            <div className="flex items-center gap-3 text-red-500 font-bold bg-red-50 dark:bg-red-900/10 p-5 rounded-2xl border border-red-500/20 animate-in fade-in slide-in-from-top-4">
+            <div className="flex items-center gap-3 text-red-500 font-bold bg-red-50 dark:bg-red-900/10 p-5 rounded-2xl border border-red-500/20">
               <AlertCircle className="w-6 h-6 flex-shrink-0" />
               <span className="text-sm">{error}</span>
             </div>
@@ -188,16 +197,9 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           <button
             onClick={handleProcess}
             disabled={isLoading || !url.trim()}
-            className="w-full h-16 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-3xl font-black text-xl shadow-2xl shadow-red-600/40 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-4 group"
+            className="w-full h-16 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-3xl font-black text-xl shadow-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-4 group"
           >
-            {isLoading ? (
-              <Loader2 className="w-8 h-8 animate-spin" />
-            ) : (
-              <>
-                <Search className="w-7 h-7 transition-transform group-hover:scale-110" />
-                Extract Media Data
-              </>
-            )}
+            {isLoading ? <Loader2 className="w-8 h-8 animate-spin" /> : <><Search className="w-7 h-7" /> Get Video Data</>}
           </button>
         </div>
       </div>
@@ -208,47 +210,42 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             <VideoPreview metadata={metadata} />
             <ThumbnailSection metadata={metadata} />
           </div>
-          <QualitySelector onDownload={handleDownload} />
+          <QualitySelector 
+            onDownload={handleDownload} 
+            availableResolutions={resolutions?.progressive || ['360p', '720p', '1080p']}
+            availableAudio={resolutions?.audio || ['128kbps', '192kbps', '320kbps']}
+          />
         </div>
       )}
 
       {isProcessing && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-6">
-          <div className="bg-slate-900 rounded-[3rem] p-10 max-w-xl w-full shadow-2xl border border-white/5 space-y-8 animate-in zoom-in duration-300">
+          <div className="bg-slate-900 rounded-[3rem] p-10 max-w-xl w-full shadow-2xl border border-white/5 space-y-8">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="p-4 bg-red-600 rounded-3xl text-white shadow-2xl shadow-red-600/40">
+                <div className="p-4 bg-red-600 rounded-3xl text-white">
                   <Cpu className="w-8 h-8 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-white">Bypassing Restrictions</h3>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor</p>
+                  <h3 className="text-2xl font-black text-white">Streaming Binary</h3>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat}</p>
                 </div>
               </div>
               <span className="text-4xl font-black text-red-500">{progress}%</span>
             </div>
-
             <div className="w-full bg-slate-800/50 rounded-full h-3 overflow-hidden border border-white/5">
-              <div 
-                className="bg-gradient-to-r from-red-600 to-rose-500 h-full rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
+              <div className="bg-gradient-to-r from-red-600 to-rose-500 h-full rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
             </div>
-
             <div className="bg-black/40 rounded-3xl p-6 h-40 overflow-y-auto font-mono text-[10px] space-y-2 border border-white/5 custom-scrollbar">
               {logs.map((log, i) => (
-                <div key={i} className="flex gap-3 text-slate-400">
-                  <span className="text-slate-600">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
-                  <span className="text-slate-200">{log}</span>
+                <div key={i} className="flex gap-3 text-slate-200">
+                  <span className="text-slate-600">[{new Date().toLocaleTimeString()}]</span>
+                  <span>{log}</span>
                 </div>
               ))}
               <div className="animate-pulse text-red-500">█</div>
             </div>
-
-            <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-widest">
-              <Loader2 className="w-4 h-4 animate-spin text-red-600" />
-              Piping binary stream...
-            </div>
+            <div className="text-center text-slate-400 font-bold text-xs uppercase tracking-widest">Please stay on this page while we pipe the media stream...</div>
           </div>
         </div>
       )}
