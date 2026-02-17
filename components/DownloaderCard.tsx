@@ -76,10 +76,11 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
     const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
     
-    // Create a hidden anchor to trigger the browser's download manager
+    // Create a hidden anchor to trigger the browser's download manager silently
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.target = '_self'; 
+    link.style.display = 'none';
     link.setAttribute('download', ''); 
     document.body.appendChild(link);
     link.click();

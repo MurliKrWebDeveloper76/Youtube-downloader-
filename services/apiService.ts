@@ -1,4 +1,3 @@
-
 import { VideoMetadata } from "../types";
 import { extractMetadata as geminiFallback } from "./geminiService";
 
@@ -53,7 +52,7 @@ export const apiService = {
   },
 
   /**
-   * Generates a conceptual download URL for the backend
+   * Generates a download URL for the unified backend
    */
   getDownloadUrl(videoId: string, format: string): string {
     return `/api/download?id=${videoId}&format=${encodeURIComponent(format)}`;
