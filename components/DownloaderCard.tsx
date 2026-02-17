@@ -13,11 +13,10 @@ interface DownloaderCardProps {
 
 const backendLogs = [
   "[python] Initializing yt-dlp engine...",
-  "[network] Connecting to YT API...",
-  "[parser] Resolving adaptive stream...",
+  "[network] Connecting to YouTube API...",
+  "[parser] Resolving stream manifest...",
   "[system] Analyzing DASH segments...",
-  "[ffmpeg] Executing remuxing...",
-  "[status] Buffer ready for streaming."
+  "[status] Handshaking proxy stream..."
 ];
 
 export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => {
@@ -45,7 +44,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const handleProcess = async () => {
     const cleanUrl = url.trim();
     if (!validateUrl(cleanUrl)) {
-      setError('Please provide a valid YouTube URL or Video ID.');
+      setError('Please provide a valid YouTube link or ID.');
       return;
     }
     
@@ -57,8 +56,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       const data = await apiService.extractMetadata(cleanUrl);
       setMetadata(data);
     } catch (err: any) {
-      console.error('Extraction Error:', err);
-      setError(err.message || 'Service is currently under heavy load. Please try again.');
+      setError(err.message || 'The video extraction failed. Please try a different URL.');
     } finally {
       setIsLoading(false);
     }
@@ -69,35 +67,40 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       const text = await navigator.clipboard.readText();
       if (text) {
         setUrl(text);
-        if (validateUrl(text)) {
-          setTimeout(handleProcess, 100);
-        }
+        if (validateUrl(text)) setTimeout(handleProcess, 100);
       }
     } catch (err) {
-      setError('Clipboard access denied. Please paste manually.');
+      setError('Clipboard blocked. Please paste manually.');
     }
   };
 
   const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
-    // 1. Construct the optimized streaming proxy URL
     const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
     
-    // 2. Trigger download instantly using direct window location
-    window.location.assign(downloadUrl);
-
-    // 3. Close processing overlay almost immediately for a "fast" feel
+    // Create a hidden anchor to trigger the stream download
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', ''); // Suggested by headers anyway
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    
+    // Click the link to start the stream in a background context
+    link.click();
+    
+    // Remove the link after a short delay
     setTimeout(() => {
+      document.body.removeChild(link);
       setIsProcessing(false);
       if (onSuccessRef.current) {
         onSuccessRef.current({
           id: Math.random().toString(36).substr(2, 9),
           timestamp: Date.now(),
           title: currentMetadata.title,
-          thumbnail: currentMetadata.thumbnailUrl || `https://img.youtube.com/vi/${currentMetadata.id}/mqdefault.jpg`,
+          thumbnail: currentMetadata.thumbnailUrl,
           format: format
         });
       }
-    }, 1000);
+    }, 1500);
   }, []);
 
   const handleDownload = (format: string) => {
@@ -106,16 +109,14 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Handshaking with secure proxy..."]);
+    setLogs(["[api] Initializing direct-proxy stream..."]);
 
-    // Accelerated progress for "One Click" feel
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        // High increment (15-25% per tick)
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 20) + 15, 100);
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 25) + 15, 100);
         
-        if (nextProgress % 30 === 0 && logIdx < backendLogs.length) {
+        if (nextProgress % 35 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
@@ -125,10 +126,9 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           finalizeDownload(format, metadata);
           return 100;
         }
-        
         return nextProgress;
       });
-    }, 60); // Faster interval (60ms vs 120ms)
+    }, 70);
   };
 
   return (
@@ -137,13 +137,13 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-red-500 rounded-2xl shadow-lg shadow-red-500/30">
+              <div className="p-3 bg-red-600 rounded-2xl shadow-lg shadow-red-600/30">
                 <Youtube className="w-8 h-8 text-white" />
               </div>
               <div>
                 <h2 className="text-3xl font-black tracking-tight dark:text-white">YT Ultra</h2>
                 <div className="flex items-center gap-2">
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Instant One-Click Engine</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Instant Pipe Engine</p>
                   <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
                 </div>
               </div>
@@ -152,7 +152,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Core Active
+                Service Ready
               </span>
             </div>
           </div>
@@ -161,11 +161,11 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             <input
               ref={inputRef}
               type="text"
-              placeholder="Paste link or video ID..."
+              placeholder="Paste YouTube link here..."
               value={url}
               onChange={(e) => { setUrl(e.target.value); if (error) setError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleProcess()}
-              className="w-full h-18 pl-8 pr-44 rounded-3xl bg-white/40 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-800 focus:border-red-500 dark:focus:border-red-500 outline-none transition-all text-xl font-medium shadow-xl backdrop-blur-md dark:text-white"
+              className="w-full h-18 pl-8 pr-44 rounded-3xl bg-white/40 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-800 focus:border-red-600 dark:focus:border-red-600 outline-none transition-all text-xl font-medium shadow-xl backdrop-blur-md dark:text-white placeholder:text-slate-400"
             />
             <div className="absolute right-3 top-3 bottom-3 flex gap-2">
               <button
@@ -188,14 +188,14 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           <button
             onClick={handleProcess}
             disabled={isLoading || !url.trim()}
-            className="w-full h-16 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-3xl font-black text-xl shadow-2xl shadow-red-500/40 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-4 group overflow-hidden"
+            className="w-full h-16 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-3xl font-black text-xl shadow-2xl shadow-red-600/40 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-4 group"
           >
             {isLoading ? (
               <Loader2 className="w-8 h-8 animate-spin" />
             ) : (
               <>
                 <Search className="w-7 h-7 transition-transform group-hover:scale-110" />
-                Initialize Ultra Extraction
+                Start Video Extraction
               </>
             )}
           </button>
@@ -203,7 +203,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       </div>
 
       {metadata && !isLoading && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
           <div className="space-y-8">
             <VideoPreview metadata={metadata} />
             <ThumbnailSection metadata={metadata} />
@@ -214,44 +214,40 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
       {isProcessing && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-6">
-          <div className="bg-slate-900 rounded-[3rem] p-10 max-w-xl w-full shadow-2xl border border-white/5 space-y-10 animate-in zoom-in duration-300">
+          <div className="bg-slate-900 rounded-[3rem] p-10 max-w-xl w-full shadow-2xl border border-white/5 space-y-8 animate-in zoom-in duration-300">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="p-4 bg-red-600 rounded-3xl text-white shadow-2xl shadow-red-600/40">
                   <Cpu className="w-8 h-8 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-white">Advanced Compute</h3>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor</p>
+                  <h3 className="text-2xl font-black text-white">Direct Stream Proxy</h3>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Initializing</p>
                 </div>
               </div>
-              <div className="flex flex-col items-end">
-                <span className="text-4xl font-black text-red-500">{progress}%</span>
-              </div>
+              <span className="text-4xl font-black text-red-500">{progress}%</span>
             </div>
 
-            <div className="w-full bg-slate-800/50 rounded-full h-3 overflow-hidden p-0.5 border border-white/5">
+            <div className="w-full bg-slate-800/50 rounded-full h-3 overflow-hidden border border-white/5">
               <div 
-                className="bg-gradient-to-r from-red-600 to-rose-500 h-full rounded-full transition-all duration-300 shadow-[0_0_20px_rgba(220,38,38,0.5)]"
+                className="bg-gradient-to-r from-red-600 to-rose-500 h-full rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
 
-            <div className="bg-black/60 rounded-3xl p-6 h-48 overflow-y-auto font-mono text-[10px] space-y-2 border border-white/5 custom-scrollbar shadow-inner">
+            <div className="bg-black/40 rounded-3xl p-6 h-40 overflow-y-auto font-mono text-[10px] space-y-2 border border-white/5 custom-scrollbar">
               {logs.map((log, i) => (
-                <div key={i} className="flex gap-3 text-slate-300 animate-in fade-in slide-in-from-left-2">
+                <div key={i} className="flex gap-3 text-slate-400">
                   <span className="text-slate-600">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
-                  <span className={log.includes('[python]') ? 'text-blue-400' : 'text-slate-200'}>{log}</span>
+                  <span className="text-slate-200">{log}</span>
                 </div>
               ))}
               <div className="animate-pulse text-red-500">█</div>
             </div>
 
-            <div className="text-center">
-              <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">
-                <Loader2 className="w-4 h-4 animate-spin text-red-500" />
-                Piping stream to browser...
-              </div>
+            <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-widest">
+              <Loader2 className="w-4 h-4 animate-spin text-red-600" />
+              Piping data to browser...
             </div>
           </div>
         </div>
