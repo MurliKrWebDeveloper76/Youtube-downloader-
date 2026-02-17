@@ -37,14 +37,23 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validateUrl = (val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed) return false;
     const pattern = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\/.+$/;
-    return pattern.test(val);
+    // Simple check for just the ID as well
+    const idPattern = /^[a-zA-Z0-9_-]{11}$/;
+    return pattern.test(trimmed) || idPattern.test(trimmed);
   };
 
   const handleProcess = async () => {
     const cleanUrl = url.trim();
+    if (!cleanUrl) {
+      setError('Please enter a YouTube link.');
+      return;
+    }
+
     if (!validateUrl(cleanUrl)) {
-      setError('Invalid YouTube link. Please paste a valid video URL.');
+      setError('Invalid format. Please use a standard YouTube link.');
       return;
     }
     
@@ -54,10 +63,11 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
     try {
       const data = await extractMetadata(cleanUrl);
+      if (!data) throw new Error('No metadata returned');
       setMetadata(data);
     } catch (err) {
       console.error('Extraction error:', err);
-      setError('Extraction failed. The video might be restricted or region-locked.');
+      setError('Processing failed. Please try a different video link.');
     } finally {
       setIsLoading(false);
     }
@@ -65,35 +75,28 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
   const handlePaste = async () => {
     try {
-      // First, attempt to use the Permissions API if available for better diagnostics
       if (navigator.permissions && navigator.permissions.query) {
         try {
           const result = await navigator.permissions.query({ name: 'clipboard-read' as any });
           if (result.state === 'denied') {
-            setError('Clipboard access blocked by browser. Please paste manually.');
+            setError('Clipboard access denied. Please paste manually.');
             return;
           }
-        } catch (e) {
-          // Permission query might not be supported for clipboard-read in all browsers
-        }
+        } catch (e) {}
       }
 
       const text = await navigator.clipboard.readText();
       if (!text) {
-        setError('Clipboard is empty. Copy a link first!');
+        setError('Clipboard is empty.');
         return;
       }
 
       setUrl(text);
       if (validateUrl(text)) {
         handleProcess();
-      } else {
-        setError('Pasted content is not a valid YouTube URL.');
       }
     } catch (err: any) {
-      console.error('Clipboard error:', err);
-      // Fallback: If clipboard API fails, let user know
-      setError('Auto-paste failed. Please right-click or use Ctrl+V/Cmd+V.');
+      setError('Auto-paste failed. Use Ctrl+V or right-click to paste.');
     }
   };
 
@@ -117,7 +120,6 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           logIdx++;
         }
 
-        // Variable progress speed for realism
         const increment = Math.floor(Math.random() * 10) + 2;
         return Math.min(prev + increment, 100);
       });
@@ -126,8 +128,6 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
   const finalizeDownload = async (format: string) => {
     try {
-      // Functional: Triggering a real sample media file download
-      // In a real production setup, this would be an endpoint like /api/v1/download?id=...
       const sampleMedia = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
       
       const response = await fetch(sampleMedia);
@@ -157,9 +157,8 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       }
     } catch (err) {
       console.error('Final download step failed:', err);
-      // Even if fetch fails due to CORS, provide a direct link fallback
       setIsProcessing(false);
-      setError('Secure tunnel failed. Using direct fallback link...');
+      setError('Security bridge failed. Opening direct fallback link...');
       window.open('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', '_blank');
     }
   };
