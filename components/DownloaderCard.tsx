@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Youtube, Search, Clipboard, Loader2, AlertCircle, Cpu, Database, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
@@ -75,19 +74,17 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   };
 
   const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
+    // Crucial: This URL now hits the fixed streaming endpoint in api/download.py
     const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
     
-    // Create a hidden anchor to trigger the stream download
+    // Trigger download via hidden link
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.setAttribute('download', ''); // Suggested by headers anyway
+    link.setAttribute('download', '');
     link.style.display = 'none';
     document.body.appendChild(link);
-    
-    // Click the link to start the stream in a background context
     link.click();
     
-    // Remove the link after a short delay
     setTimeout(() => {
       document.body.removeChild(link);
       setIsProcessing(false);
@@ -100,7 +97,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           format: format
         });
       }
-    }, 1500);
+    }, 2000);
   }, []);
 
   const handleDownload = (format: string) => {
@@ -109,14 +106,14 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Initializing direct-proxy stream..."]);
+    setLogs(["[api] Connecting to ultra-secure proxy..."]);
 
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 25) + 15, 100);
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 20) + 15, 100);
         
-        if (nextProgress % 35 === 0 && logIdx < backendLogs.length) {
+        if (nextProgress % 30 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
@@ -128,7 +125,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
         }
         return nextProgress;
       });
-    }, 70);
+    }, 80);
   };
 
   return (
@@ -152,7 +149,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Service Ready
+                Stream Engine Ready
               </span>
             </div>
           </div>
@@ -195,7 +192,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             ) : (
               <>
                 <Search className="w-7 h-7 transition-transform group-hover:scale-110" />
-                Start Video Extraction
+                Extract Media Details
               </>
             )}
           </button>
@@ -221,8 +218,8 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
                   <Cpu className="w-8 h-8 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-white">Direct Stream Proxy</h3>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Initializing</p>
+                  <h3 className="text-2xl font-black text-white">Direct Pipe Active</h3>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor</p>
                 </div>
               </div>
               <span className="text-4xl font-black text-red-500">{progress}%</span>
@@ -247,7 +244,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
             <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-widest">
               <Loader2 className="w-4 h-4 animate-spin text-red-600" />
-              Piping data to browser...
+              Starting transfer to browser...
             </div>
           </div>
         </div>
