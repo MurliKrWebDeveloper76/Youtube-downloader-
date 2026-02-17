@@ -1,7 +1,9 @@
 import os
+import sys
 import subprocess
 import json
 import requests
+import yt_dlp
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 
@@ -18,10 +20,6 @@ BROWSER_HEADERS = {
     'Upgrade-Insecure-Requests': '1',
 }
 
-def get_yt_dlp_binary():
-    # Attempt to find yt-dlp binary
-    return "yt-dlp"
-
 @app.route('/api/video_info', methods=['POST', 'OPTIONS'])
 def video_info():
     if request.method == 'OPTIONS':
@@ -33,31 +31,29 @@ def video_info():
             return jsonify({"error": "YouTube URL is required."}), 400
             
         url = data['url']
-        cmd = [
-            get_yt_dlp_binary(),
-            '--quiet',
-            '--no-warnings',
-            '--nocheckcertificate',
-            '--dump-json',
-            '--no-playlist',
-            url
-        ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            return jsonify({"error": "Could not extract video info. Video might be restricted or blocked."}), 400
+        # Use the library directly for info extraction (faster & more reliable)
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'user_agent': BROWSER_HEADERS['User-Agent'],
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return jsonify({"error": "Video not found."}), 404
             
-        info = json.loads(result.stdout)
-        
-        return jsonify({
-            "id": info.get('id'),
-            "title": info.get('title'),
-            "author": info.get('uploader') or info.get('channel', 'Unknown'),
-            "duration": f"{info.get('duration', 0) // 60}:{info.get('duration', 0) % 60:02d}",
-            "views": f"{info.get('view_count', 0):,}",
-            "thumbnailUrl": info.get('thumbnail'),
-            "url": url
-        })
+            return jsonify({
+                "id": info.get('id'),
+                "title": info.get('title'),
+                "author": info.get('uploader') or info.get('channel', 'Unknown'),
+                "duration": f"{info.get('duration', 0) // 60}:{info.get('duration', 0) % 60:02d}",
+                "views": f"{info.get('view_count', 0):,}",
+                "thumbnailUrl": info.get('thumbnail'),
+                "url": url
+            })
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -70,39 +66,36 @@ def available_resolutions():
         if not url:
             return jsonify({"error": "URL required"}), 400
             
-        cmd = [
-            get_yt_dlp_binary(),
-            '--quiet',
-            '--dump-json',
-            url
-        ]
+        ydl_opts = {
+            'quiet': True,
+            'nocheckcertificate': True,
+            'user_agent': BROWSER_HEADERS['User-Agent'],
+        }
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        info = json.loads(result.stdout)
-        formats = info.get('formats', [])
-        
-        # We look for progressive formats (video + audio in one file) 
-        # because Vercel doesn't have ffmpeg to merge separate streams.
-        res_set = set()
-        for f in formats:
-            if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('ext') == 'mp4':
-                res = f.get('height')
-                if res:
-                    res_set.add(f"{res}p")
-        
-        return jsonify({
-            "progressive": sorted(list(res_set), key=lambda x: int(x.replace('p', ''))),
-            "audio": ["128kbps", "192kbps", "320kbps"]
-        })
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = info.get('formats', [])
+            
+            res_set = set()
+            for f in formats:
+                if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('ext') == 'mp4':
+                    res = f.get('height')
+                    if res:
+                        res_set.add(f"{res}p")
+            
+            return jsonify({
+                "progressive": sorted(list(res_set), key=lambda x: int(x.replace('p', ''))),
+                "audio": ["128kbps", "192kbps", "320kbps"]
+            })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download')
 def download():
     """
-    ULTRA DIRECT PIPE:
-    Streams binary data directly from yt-dlp stdout to the response.
-    Forces application/octet-stream to prevent browser media players from hijacking.
+    ULTRA DIRECT PIPE (FIXED FOR VERCEL):
+    Uses sys.executable -m yt_dlp to ensure the module is found in the Vercel environment.
+    Streams binary data directly from stdout to the response.
     """
     video_id = request.args.get('id')
     res_req = request.args.get('resolution', '720p')
@@ -114,26 +107,26 @@ def download():
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     height = res_req.replace('p', '')
     
-    # Select best progressive mp4 up to requested height
-    # If mp3, select best audio
     if format_type == 'mp3':
         format_spec = 'bestaudio/best'
     else:
+        # Request progressive mp4 to avoid merging (Vercel has no ffmpeg)
         format_spec = f'best[height<={height}][ext=mp4]/best'
 
     def generate():
+        # Using sys.executable -m yt_dlp solves the [Errno 2] error
         cmd = [
-            get_yt_dlp_binary(),
+            sys.executable, "-m", "yt_dlp",
             '-f', format_spec,
             '--no-playlist',
             '--no-warnings',
             '--nocheckcertificate',
-            '-o', '-',  # Output to stdout
+            '--user-agent', BROWSER_HEADERS['User-Agent'],
+            '-o', '-',  # Stream to stdout
             video_url
         ]
         
-        # Use Popen to pipe stdout directly
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         
         try:
             while True:
@@ -144,10 +137,11 @@ def download():
         finally:
             proc.terminate()
 
-    # Get title for filename
+    # Get title via library for robustness
     try:
-        title_cmd = [get_yt_dlp_binary(), '--get-title', '--no-playlist', video_url]
-        title = subprocess.check_output(title_cmd).decode('utf-8').strip()
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+            title = info.get('title', 'video')
     except:
         title = "video"
 
