@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Youtube, Search, Clipboard, Loader2, AlertCircle, Cpu, Database, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
@@ -74,14 +75,15 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   };
 
   const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
-    // Crucial: This URL now hits the fixed streaming endpoint in api/download.py
+    // The unified backend route
     const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
     
-    // Trigger download via hidden link
+    // Create a temporary hidden link to trigger the forced download
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.setAttribute('download', '');
     link.style.display = 'none';
+    // Adding target="_self" can help prevent the browser from opening a blank tab in some cases
+    link.target = '_self';
     document.body.appendChild(link);
     link.click();
     
@@ -106,12 +108,12 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Connecting to ultra-secure proxy..."]);
+    setLogs(["[api] Initializing direct-pipe stream..."]);
 
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 20) + 15, 100);
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 25) + 15, 100);
         
         if (nextProgress % 30 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
@@ -125,7 +127,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
         }
         return nextProgress;
       });
-    }, 80);
+    }, 60);
   };
 
   return (
@@ -140,7 +142,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div>
                 <h2 className="text-3xl font-black tracking-tight dark:text-white">YT Ultra</h2>
                 <div className="flex items-center gap-2">
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Instant Pipe Engine</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Instant One-Click Pipe</p>
                   <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
                 </div>
               </div>
@@ -149,7 +151,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Stream Engine Ready
+                Proxy Ready
               </span>
             </div>
           </div>
@@ -192,7 +194,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             ) : (
               <>
                 <Search className="w-7 h-7 transition-transform group-hover:scale-110" />
-                Extract Media Details
+                Fetch Media Data
               </>
             )}
           </button>
@@ -218,7 +220,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
                   <Cpu className="w-8 h-8 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-white">Direct Pipe Active</h3>
+                  <h3 className="text-2xl font-black text-white">Advanced Computing</h3>
                   <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor</p>
                 </div>
               </div>
@@ -244,7 +246,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
             <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-widest">
               <Loader2 className="w-4 h-4 animate-spin text-red-600" />
-              Starting transfer to browser...
+              Transferring data to browser...
             </div>
           </div>
         </div>
