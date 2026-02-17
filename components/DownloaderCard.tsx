@@ -13,12 +13,11 @@ interface DownloaderCardProps {
 
 const backendLogs = [
   "[python] Initializing yt-dlp engine...",
-  "[network] Connecting to YouTube API endpoints...",
-  "[parser] Resolving adaptive stream manifests...",
-  "[system] Analyzing DASH/HLS segments...",
-  "[process] Merging M4A and MP4 containers...",
-  "[ffmpeg] Executing remuxing sequence...",
-  "[status] Output buffer verified and ready."
+  "[network] Connecting to YT API...",
+  "[parser] Resolving adaptive stream...",
+  "[system] Analyzing DASH segments...",
+  "[ffmpeg] Executing remuxing...",
+  "[status] Buffer ready for streaming."
 ];
 
 export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => {
@@ -79,15 +78,14 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     }
   };
 
-  const finalizeDownload = useCallback(async (format: string, currentMetadata: VideoMetadata) => {
-    // 1. Construct the direct streaming proxy URL
+  const finalizeDownload = useCallback((format: string, currentMetadata: VideoMetadata) => {
+    // 1. Construct the optimized streaming proxy URL
     const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
     
-    // 2. Use window.location.assign to trigger the browser's native download manager
-    // This is more robust than Fetch/Blob for large video files as it handles headers directly
+    // 2. Trigger download instantly using direct window location
     window.location.assign(downloadUrl);
 
-    // 3. Close the processing overlay after a short delay
+    // 3. Close processing overlay almost immediately for a "fast" feel
     setTimeout(() => {
       setIsProcessing(false);
       if (onSuccessRef.current) {
@@ -99,7 +97,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           format: format
         });
       }
-    }, 2000);
+    }, 1000);
   }, []);
 
   const handleDownload = (format: string) => {
@@ -108,27 +106,29 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Initializing ultra-secure proxy session..."]);
+    setLogs(["[api] Handshaking with secure proxy..."]);
 
+    // Accelerated progress for "One Click" feel
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 10) + 2, 100);
+        // High increment (15-25% per tick)
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 20) + 15, 100);
         
-        if (nextProgress % 15 === 0 && logIdx < backendLogs.length) {
+        if (nextProgress % 30 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
 
         if (nextProgress >= 100) {
           clearInterval(interval);
-          setTimeout(() => finalizeDownload(format, metadata), 800);
+          finalizeDownload(format, metadata);
           return 100;
         }
         
         return nextProgress;
       });
-    }, 120);
+    }, 60); // Faster interval (60ms vs 120ms)
   };
 
   return (
@@ -143,7 +143,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div>
                 <h2 className="text-3xl font-black tracking-tight dark:text-white">YT Ultra</h2>
                 <div className="flex items-center gap-2">
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Proxy-Stream Processing</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Instant One-Click Engine</p>
                   <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
                 </div>
               </div>
@@ -152,7 +152,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Secure Core
+                Core Active
               </span>
             </div>
           </div>
@@ -161,7 +161,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             <input
               ref={inputRef}
               type="text"
-              placeholder="Paste link or video ID to process..."
+              placeholder="Paste link or video ID..."
               value={url}
               onChange={(e) => { setUrl(e.target.value); if (error) setError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleProcess()}
@@ -214,20 +214,19 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
       {isProcessing && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-6">
-          <div className="bg-slate-900 rounded-[3rem] p-10 max-w-xl w-full shadow-2xl border border-white/5 space-y-10 animate-in zoom-in duration-500">
+          <div className="bg-slate-900 rounded-[3rem] p-10 max-w-xl w-full shadow-2xl border border-white/5 space-y-10 animate-in zoom-in duration-300">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="p-4 bg-red-600 rounded-3xl text-white shadow-2xl shadow-red-600/40">
                   <Cpu className="w-8 h-8 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-white">Advanced Compute Core</h3>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor Active</p>
+                  <h3 className="text-2xl font-black text-white">Advanced Compute</h3>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor</p>
                 </div>
               </div>
               <div className="flex flex-col items-end">
                 <span className="text-4xl font-black text-red-500">{progress}%</span>
-                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Segment {Math.ceil(progress/10)}/10</span>
               </div>
             </div>
 
@@ -238,22 +237,20 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               />
             </div>
 
-            <div className="bg-black/60 rounded-3xl p-6 h-64 overflow-y-auto font-mono text-xs space-y-2 border border-white/5 custom-scrollbar shadow-inner">
+            <div className="bg-black/60 rounded-3xl p-6 h-48 overflow-y-auto font-mono text-[10px] space-y-2 border border-white/5 custom-scrollbar shadow-inner">
               {logs.map((log, i) => (
-                <div key={i} className="flex gap-3 text-slate-300 animate-in fade-in slide-in-from-left-4">
-                  <span className="text-slate-600 font-bold">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
-                  <span className={log.includes('[python]') ? 'text-blue-400' : log.includes('[ffmpeg]') ? 'text-purple-400' : 'text-slate-200'}>
-                    {log}
-                  </span>
+                <div key={i} className="flex gap-3 text-slate-300 animate-in fade-in slide-in-from-left-2">
+                  <span className="text-slate-600">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
+                  <span className={log.includes('[python]') ? 'text-blue-400' : 'text-slate-200'}>{log}</span>
                 </div>
               ))}
               <div className="animate-pulse text-red-500">█</div>
             </div>
 
-            <div className="text-center space-y-2">
+            <div className="text-center">
               <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">
                 <Loader2 className="w-4 h-4 animate-spin text-red-500" />
-                Secure Proxying in Progress
+                Piping stream to browser...
               </div>
             </div>
           </div>

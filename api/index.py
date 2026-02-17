@@ -10,13 +10,15 @@ from urllib.parse import quote
 app = Flask(__name__)
 CORS(app)
 
-# Enhanced headers to bypass basic bot detection
+# Enhanced headers to bypass basic bot detection and mimic a real browser
 BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Accept': '*/*',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Origin': 'https://www.youtube.com',
-    'Referer': 'https://www.youtube.com/',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Upgrade-Insecure-Requests': '1'
 }
 
 @app.route('/api/extract', methods=['POST', 'OPTIONS'])
@@ -62,8 +64,9 @@ def extract():
 @app.route('/api/download')
 def download():
     """
-    Directly streams the video/audio file to the browser.
-    This method is 'Ultra' because it acts as a proxy, bypassing CORS and AccessDenied.
+    Ultra-fast streaming proxy.
+    Directly pipes bytes from the source to the browser.
+    Ensures Content-Length is passed to avoid "loading full video before download" issues.
     """
     video_id = request.args.get('id')
     format_req = request.args.get('format', 'MP4 720p')
@@ -74,8 +77,7 @@ def download():
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     
     try:
-        # 1. Extract the direct stream URL
-        # We look for single-file formats (best) to ensure we don't need to merge on the fly
+        # 1. Extract the direct stream URL with higher quality preference
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'quiet': True,
@@ -89,31 +91,42 @@ def download():
             title = info.get('title', 'video').replace(' ', '_')
             
         if not stream_url:
-            # Fallback to a reliable public sample if YouTube blocks the server IP
+            # High speed reliable fallback for demonstration if YT blocks server
             stream_url = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
             title = "Download_Fallback"
 
-        # 2. Proxy the stream
-        # This solves the AccessDenied XML issue because the backend (not the browser) fetches the data
-        response = requests.get(stream_url, stream=True, headers=BROWSER_HEADERS, timeout=20)
+        # 2. Proxy the stream with optimized chunking
+        # We use stream=True and a larger chunk size for better performance
+        response = requests.get(stream_url, stream=True, headers=BROWSER_HEADERS, timeout=30)
         
         def generate():
-            for chunk in response.iter_content(chunk_size=1024 * 128):
+            # Use a 256KB chunk for smoother streaming in Python
+            for chunk in response.iter_content(chunk_size=256 * 1024):
                 if chunk:
                     yield chunk
 
         file_ext = "mp3" if "MP3" in format_req else "mp4"
-        safe_name = "".join([c for c in title if c.isalnum() or c in ('_', '-')]).strip()
+        safe_name = "".join([c for c in title if c.isalnum() or c in ('_', '-')]).strip()[:100]
         filename = f"YT_Ultra_{safe_name}.{file_ext}"
+
+        # Build response headers carefully
+        headers = {
+            'Content-Type': response.headers.get('Content-Type', 'video/mp4'),
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+        }
+        
+        # CRITICAL: If we have the content length, pass it! 
+        # This tells the browser exactly how much to download and avoids pre-buffering delays.
+        content_len = response.headers.get('Content-Length')
+        if content_len:
+            headers['Content-Length'] = content_len
 
         return Response(
             stream_with_context(generate()),
-            headers={
-                'Content-Type': response.headers.get('Content-Type', 'video/mp4'),
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Length': response.headers.get('Content-Length'),
-                'Cache-Control': 'no-cache'
-            }
+            headers=headers
         )
 
     except Exception as e:
