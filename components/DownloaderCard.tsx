@@ -33,7 +33,6 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
   const inputRef = useRef<HTMLInputElement>(null);
   
-  // Use a Ref to hold the onSuccess callback to prevent ReferenceErrors in stale closures
   const onSuccessRef = useRef(onSuccess);
   useEffect(() => {
     onSuccessRef.current = onSuccess;
@@ -82,7 +81,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
   const finalizeDownload = useCallback(async (format: string, currentMetadata: VideoMetadata) => {
     try {
-      // 1. Get the real download URL from the backend to avoid AccessDenied/0.29KB errors
+      // 1. Get the Proxied Download URL from the backend
       const response = await fetch(`/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`);
       if (!response.ok) throw new Error("Download server busy");
       
@@ -90,22 +89,17 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       const downloadUrl = data.downloadUrl;
       const fileName = data.fileName;
 
-      // 2. Trigger the browser download properly
-      const res = await fetch(downloadUrl);
-      const blob = await res.blob();
-      const blobObjectUrl = window.URL.createObjectURL(blob);
-      
+      // 2. Direct browser download via hidden link targeting the proxy stream
+      // Using an <a> tag directly ensures Chrome's download manager handles the stream
       const link = document.createElement('a');
-      link.href = blobObjectUrl;
-      link.download = fileName;
+      link.href = downloadUrl;
+      link.setAttribute('download', fileName);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobObjectUrl);
 
       setIsProcessing(false);
       
-      // 3. Notify history using the Ref-based callback
       if (onSuccessRef.current) {
         onSuccessRef.current({
           id: Math.random().toString(36).substr(2, 9),
@@ -118,8 +112,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     } catch (err) {
       console.error("Finalize download error:", err);
       setIsProcessing(false);
-      // Absolute fallback for demo purposes
-      window.open('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', '_blank');
+      setError("Download session timed out. Please try again.");
     }
   }, []);
 
@@ -129,7 +122,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Initializing ultra-secure session..."]);
+    setLogs(["[api] Initializing ultra-secure proxy session..."]);
 
     let logIdx = 0;
     const interval = setInterval(() => {
@@ -164,7 +157,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div>
                 <h2 className="text-3xl font-black tracking-tight dark:text-white">YT Ultra</h2>
                 <div className="flex items-center gap-2">
-                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Hybrid Processing</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Proxy-Stream Processing</p>
                   <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
                 </div>
               </div>
@@ -173,7 +166,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Active Core
+                Secure Core
               </span>
             </div>
           </div>
@@ -274,7 +267,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             <div className="text-center space-y-2">
               <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">
                 <Loader2 className="w-4 h-4 animate-spin text-red-500" />
-                Secure Handshake in Progress
+                Secure Proxying in Progress
               </div>
             </div>
           </div>
