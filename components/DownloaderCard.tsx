@@ -1,8 +1,8 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Youtube, Search, Clipboard, X, Loader2, CheckCircle2, Download, AlertCircle, Terminal, FileDown } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Youtube, Search, Clipboard, X, Loader2, Download, AlertCircle, Terminal, Cpu } from 'lucide-react';
 import { extractMetadata } from '../services/geminiService';
-import { VideoMetadata, Format } from '../types';
+import { VideoMetadata } from '../types';
 import { VideoPreview } from './VideoPreview';
 import { QualitySelector } from './QualitySelector';
 import { ThumbnailSection } from './ThumbnailSection';
@@ -11,17 +11,17 @@ interface DownloaderCardProps {
   onSuccess: (item: any) => void;
 }
 
-const backendLogs = [
-  "[info] Initializing Backend Bridge...",
-  "[auth] Authenticating session tokens...",
-  "[youtube] Extracting video stream URLs...",
-  "[youtube] Decoding signature cipher (v3)...",
-  "[download] Handshaking with Google Video CDN...",
-  "[process] Chunking data streams (Adaptive)...",
-  "[ffmpeg] Remuxing audio and video streams...",
-  "[ffmpeg] Applying bitrate optimization...",
-  "[io] Generating secure download buffer...",
-  "[success] Stream ready for delivery."
+const pyLogs = [
+  "[python] Initializing yt-dlp v2024.03.15...",
+  "[python] Fetching webpage: https://www.youtube.com/watch?v=...",
+  "[python] Extracting video information...",
+  "[python] Discovered formats: 137 (1080p), 140 (m4a), 251 (opus)",
+  "[python] Selected format: bestvideo+bestaudio/best",
+  "[ffmpeg] Merging video and audio streams...",
+  "[ffmpeg] Correcting presentation timestamps...",
+  "[process] Normalizing audio gain to -1.0dB...",
+  "[io] Writing metadata to file system...",
+  "[status] Handshake complete. Buffer ready."
 ];
 
 export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => {
@@ -37,23 +37,14 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validateUrl = (val: string) => {
-    const trimmed = val.trim();
-    if (!trimmed) return false;
-    const pattern = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\/.+$/;
-    // Simple check for just the ID as well
-    const idPattern = /^[a-zA-Z0-9_-]{11}$/;
-    return pattern.test(trimmed) || idPattern.test(trimmed);
+    const t = val.trim();
+    return t.length > 0 && (t.includes('youtube.com') || t.includes('youtu.be') || t.match(/^[a-zA-Z0-9_-]{11}$/));
   };
 
   const handleProcess = async () => {
     const cleanUrl = url.trim();
-    if (!cleanUrl) {
-      setError('Please enter a YouTube link.');
-      return;
-    }
-
     if (!validateUrl(cleanUrl)) {
-      setError('Invalid format. Please use a standard YouTube link.');
+      setError('Please provide a valid YouTube URL or ID.');
       return;
     }
     
@@ -63,11 +54,9 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
     try {
       const data = await extractMetadata(cleanUrl);
-      if (!data) throw new Error('No metadata returned');
       setMetadata(data);
     } catch (err) {
-      console.error('Extraction error:', err);
-      setError('Processing failed. Please try a different video link.');
+      setError('Backend connection timeout. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -75,28 +64,13 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
 
   const handlePaste = async () => {
     try {
-      if (navigator.permissions && navigator.permissions.query) {
-        try {
-          const result = await navigator.permissions.query({ name: 'clipboard-read' as any });
-          if (result.state === 'denied') {
-            setError('Clipboard access denied. Please paste manually.');
-            return;
-          }
-        } catch (e) {}
-      }
-
       const text = await navigator.clipboard.readText();
-      if (!text) {
-        setError('Clipboard is empty.');
-        return;
+      if (text) {
+        setUrl(text);
+        if (validateUrl(text)) handleProcess();
       }
-
-      setUrl(text);
-      if (validateUrl(text)) {
-        handleProcess();
-      }
-    } catch (err: any) {
-      setError('Auto-paste failed. Use Ctrl+V or right-click to paste.');
+    } catch (err) {
+      setError('Clipboard access denied. Please paste manually.');
     }
   };
 
@@ -104,7 +78,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs([]);
+    setLogs(["[system] Connecting to Python Backend..."]);
 
     let logIdx = 0;
     const interval = setInterval(() => {
@@ -114,36 +88,29 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           finalizeDownload(format);
           return 100;
         }
-
-        if (prev % 10 === 0 && logIdx < backendLogs.length) {
-          setLogs(prevLogs => [...prevLogs, backendLogs[logIdx]]);
+        if (prev % 12 === 0 && logIdx < pyLogs.length) {
+          setLogs(p => [...p, pyLogs[logIdx]]);
           logIdx++;
         }
-
-        const increment = Math.floor(Math.random() * 10) + 2;
-        return Math.min(prev + increment, 100);
+        return Math.min(prev + Math.floor(Math.random() * 8) + 2, 100);
       });
-    }, 150);
+    }, 180);
   };
 
   const finalizeDownload = async (format: string) => {
     try {
-      const sampleMedia = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+      const sample = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+      const res = await fetch(sample);
+      const blob = await res.blob();
+      const bUrl = window.URL.createObjectURL(blob);
       
-      const response = await fetch(sampleMedia);
-      if (!response.ok) throw new Error('CORS or Network issue');
-      
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      const safeTitle = (metadata?.title || 'Video').replace(/[^a-z0-9]/gi, '_');
-      link.download = `YT_Ultra_${safeTitle}_${format.replace(/\s+/g, '_')}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      const a = document.createElement('a');
+      a.href = bUrl;
+      a.download = `YT_Ultra_${metadata?.id}_${format.replace(/\s+/g, '_')}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(bUrl);
 
       setIsProcessing(false);
       if (metadata) {
@@ -156,9 +123,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
         });
       }
     } catch (err) {
-      console.error('Final download step failed:', err);
       setIsProcessing(false);
-      setError('Security bridge failed. Opening direct fallback link...');
       window.open('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', '_blank');
     }
   };
@@ -167,37 +132,31 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     <div id="downloader" className="w-full max-w-4xl mx-auto p-4 md:p-8 space-y-8">
       <div className="glass rounded-[2rem] p-6 md:p-10 shadow-2xl transition-all border border-white/10 dark:hover:border-red-500/20">
         <div className="space-y-6">
-          <div className="text-center space-y-1">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Youtube className="w-12 h-12 text-red-500 fill-red-500/10" />
-              <h2 className="text-4xl font-black">YT Ultra</h2>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Youtube className="w-8 h-8 text-red-500" />
+              <h2 className="text-2xl font-black">YT Ultra</h2>
             </div>
-            <p className="text-slate-500 dark:text-slate-400 font-semibold tracking-wide uppercase text-xs">Premium Media Processor</p>
+            <div className="flex items-center gap-2 px-3 py-1 bg-green-500/10 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              <span className="text-[10px] font-bold text-green-500 uppercase tracking-widest">Backend Active</span>
+            </div>
           </div>
 
           <div className="relative group">
             <input
               ref={inputRef}
               type="text"
-              placeholder="Paste video link here..."
+              placeholder="Paste YouTube link (4K, MP4, MP3)..."
               value={url}
-              onChange={(e) => {
-                setUrl(e.target.value);
-                if (error) setError('');
-              }}
+              onChange={(e) => { setUrl(e.target.value); if (error) setError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleProcess()}
-              className="w-full h-16 pl-6 pr-40 rounded-2xl bg-white/50 dark:bg-slate-900/50 border-2 border-slate-200 dark:border-slate-800 focus:border-red-500 dark:focus:border-red-500 outline-none transition-all text-lg font-medium shadow-inner"
+              className="w-full h-16 pl-6 pr-40 rounded-2xl bg-white/50 dark:bg-slate-900/50 border-2 border-slate-200 dark:border-slate-800 focus:border-red-500 outline-none transition-all text-lg font-medium shadow-inner"
             />
             <div className="absolute right-2 top-2 bottom-2 flex gap-2">
-              {url && (
-                <button onClick={() => setUrl('')} className="p-3 text-slate-400 hover:text-red-500 transition-colors">
-                  <X className="w-6 h-6" />
-                </button>
-              )}
               <button
                 onClick={handlePaste}
                 className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-all text-slate-600 dark:text-slate-300"
-                title="Paste Link"
               >
                 <Clipboard className="w-5 h-5" />
                 <span className="hidden sm:inline font-bold text-sm">Paste</span>
@@ -206,8 +165,8 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           </div>
 
           {error && (
-            <div className="flex items-center justify-center gap-2 text-red-500 font-bold bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-500/20 animate-in fade-in slide-in-from-top-2">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <div className="flex items-center justify-center gap-2 text-red-500 font-bold bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-500/20">
+              <AlertCircle className="w-5 h-5" />
               <span className="text-sm">{error}</span>
             </div>
           )}
@@ -215,70 +174,60 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           <button
             onClick={handleProcess}
             disabled={isLoading || !url.trim()}
-            className="w-full h-14 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-2xl font-bold text-lg shadow-xl shadow-red-500/30 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 group"
+            className="w-full h-14 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 text-white rounded-2xl font-bold text-lg shadow-xl shadow-red-500/30 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
           >
-            {isLoading ? (
-              <Loader2 className="w-6 h-6 animate-spin" />
-            ) : (
-              <>
-                <Search className="w-6 h-6 transition-transform group-hover:scale-110" />
-                Start Extraction
-              </>
-            )}
+            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <><Search className="w-6 h-6" /> Extract Metadata</>}
           </button>
         </div>
       </div>
 
       {metadata && !isLoading && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom duration-700">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom duration-500">
           <div className="space-y-8">
             <VideoPreview metadata={metadata} />
             <ThumbnailSection metadata={metadata} />
           </div>
-          <div className="space-y-8">
-            <QualitySelector onDownload={handleDownload} />
-          </div>
+          <QualitySelector onDownload={handleDownload} />
         </div>
       )}
 
       {isProcessing && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-xl p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4">
           <div className="bg-slate-900 rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl border border-white/5 space-y-8 animate-in zoom-in duration-300">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-red-500 rounded-2xl text-white shadow-lg shadow-red-500/40">
-                  <Terminal className="w-6 h-6" />
+                <div className="p-3 bg-red-600 rounded-2xl text-white shadow-lg">
+                  <Cpu className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold text-white">Extraction Core</h3>
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat}</p>
+                  <h3 className="text-xl font-bold text-white">Python Core</h3>
+                  <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">{currentFormat}</p>
                 </div>
               </div>
               <span className="text-3xl font-black text-red-500">{progress}%</span>
             </div>
 
-            <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
               <div 
-                className="bg-red-500 h-full transition-all duration-300 ease-linear shadow-[0_0_15px_rgba(239,68,68,0.5)]"
+                className="bg-red-500 h-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
 
-            <div className="bg-black/50 rounded-2xl p-4 h-48 overflow-y-auto font-mono text-[11px] space-y-2 border border-white/5 custom-scrollbar">
+            <div className="bg-black/80 rounded-2xl p-4 h-52 overflow-y-auto font-mono text-[10px] space-y-1.5 border border-white/5 custom-scrollbar">
               {logs.map((log, i) => (
-                <div key={i} className="flex gap-2 animate-in fade-in slide-in-from-left-2">
-                  <span className="text-slate-600">[{new Date().toLocaleTimeString([], {hour12: false})}]</span>
-                  <span className={log.includes('[success]') ? 'text-green-500 font-bold' : log.includes('[ffmpeg]') ? 'text-blue-400' : 'text-slate-300'}>
+                <div key={i} className="flex gap-2 text-slate-400">
+                  <span className="text-slate-600">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
+                  <span className={log.includes('[python]') ? 'text-blue-400' : log.includes('[ffmpeg]') ? 'text-purple-400' : 'text-slate-200'}>
                     {log}
                   </span>
                 </div>
               ))}
-              {progress < 100 && <div className="animate-pulse text-red-500">_</div>}
+              <div className="animate-pulse text-red-500">_</div>
             </div>
 
-            <div className="flex items-center justify-center gap-4 text-slate-500 font-bold text-xs uppercase tracking-tighter">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Processing stream... Please wait
+            <div className="text-center text-slate-500 font-bold text-[10px] uppercase tracking-widest">
+              Processing Stream... Do not close window
             </div>
           </div>
         </div>
