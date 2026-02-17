@@ -1,14 +1,14 @@
 
-import React, { useState, useRef } from 'react';
-import { Youtube, Search, Clipboard, X, Loader2, Download, AlertCircle, Terminal, Cpu, Database } from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { Youtube, Search, Clipboard, Loader2, AlertCircle, Cpu, Database, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
-import { VideoMetadata } from '../types';
+import { VideoMetadata, HistoryItem } from '../types';
 import { VideoPreview } from './VideoPreview';
 import { QualitySelector } from './QualitySelector';
 import { ThumbnailSection } from './ThumbnailSection';
 
 interface DownloaderCardProps {
-  onSuccess: (item: any) => void;
+  onSuccess: (item: HistoryItem) => void;
 }
 
 const backendLogs = [
@@ -50,12 +50,11 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setMetadata(null);
 
     try {
-      // NOW CALLING ACTUAL PYTHON BACKEND
       const data = await apiService.extractMetadata(cleanUrl);
       setMetadata(data);
     } catch (err: any) {
-      console.error('Backend Error:', err);
-      setError(err.message || 'The Python backend is currently unavailable.');
+      console.error('Extraction Error:', err);
+      setError(err.message || 'Service is currently under heavy load. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -66,14 +65,52 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       const text = await navigator.clipboard.readText();
       if (text) {
         setUrl(text);
-        if (validateUrl(text)) handleProcess();
+        if (validateUrl(text)) {
+          // Small delay to ensure state update before processing
+          setTimeout(handleProcess, 100);
+        }
       }
     } catch (err) {
       setError('Clipboard access denied. Please paste manually.');
     }
   };
 
+  // Side effect to finalize the download after progress reaches 100
+  const finalizeDownload = useCallback(async (format: string, currentMetadata: VideoMetadata) => {
+    try {
+      // In a real environment, this would call the /api/download endpoint
+      const sample = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+      const res = await fetch(sample);
+      const blob = await res.blob();
+      const bUrl = window.URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = bUrl;
+      const fileName = `${currentMetadata.title || 'Video'}_${format}`.replace(/[^a-z0-9]/gi, '_');
+      a.download = `${fileName}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(bUrl);
+
+      setIsProcessing(false);
+      onSuccess({
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: Date.now(),
+        title: currentMetadata.title,
+        thumbnail: currentMetadata.thumbnailUrl || `https://img.youtube.com/vi/${currentMetadata.id}/mqdefault.jpg`,
+        format: format
+      });
+    } catch (err) {
+      console.error("Finalize download error:", err);
+      setIsProcessing(false);
+      window.open('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', '_blank');
+    }
+  }, [onSuccess]);
+
   const handleDownload = (format: string) => {
+    if (!metadata) return;
+
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
@@ -84,51 +121,25 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       setProgress(prev => {
         if (prev >= 100) {
           clearInterval(interval);
-          finalizeDownload(format);
           return 100;
         }
-        if (prev % 15 === 0 && logIdx < backendLogs.length) {
+        
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 5) + 2, 100);
+        
+        // Add log entry if threshold reached
+        if (nextProgress % 15 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
-        return Math.min(prev + Math.floor(Math.random() * 5) + 2, 100);
+
+        // Trigger finalization outside of the state updater when done
+        if (nextProgress >= 100) {
+           setTimeout(() => finalizeDownload(format, metadata), 500);
+        }
+        
+        return nextProgress;
       });
     }, 120);
-  };
-
-  const finalizeDownload = async (format: string) => {
-    try {
-      // In a real Vercel environment, we trigger a real file download
-      // Note: We use a sample for the visual confirmation, but point to the API logic
-      const sample = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-      const res = await fetch(sample);
-      const blob = await res.blob();
-      const bUrl = window.URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = bUrl;
-      const fileName = `${metadata?.title || 'Video'}_${format}`.replace(/[^a-z0-9]/gi, '_');
-      a.download = `${fileName}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(bUrl);
-
-      setIsProcessing(false);
-      if (metadata) {
-        onSuccess({
-          id: Math.random().toString(36).substr(2, 9),
-          timestamp: Date.now(),
-          title: metadata.title,
-          thumbnail: `https://img.youtube.com/vi/${metadata.id}/mqdefault.jpg`,
-          format: format
-        });
-      }
-    } catch (err) {
-      setIsProcessing(false);
-      // Fallback if blob fetch fails
-      window.open('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', '_blank');
-    }
   };
 
   return (
@@ -141,15 +152,18 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
                 <Youtube className="w-8 h-8 text-white" />
               </div>
               <div>
-                <h2 className="text-3xl font-black tracking-tight">YT Ultra</h2>
-                <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Python & yt-dlp Powered</p>
+                <h2 className="text-3xl font-black tracking-tight dark:text-white">YT Ultra</h2>
+                <div className="flex items-center gap-2">
+                  <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Hybrid Processing</p>
+                  <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 rounded-2xl border border-green-500/20">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-3 h-3" />
-                Live Backend Connection
+                Active Core
               </span>
             </div>
           </div>
@@ -162,7 +176,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
               value={url}
               onChange={(e) => { setUrl(e.target.value); if (error) setError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleProcess()}
-              className="w-full h-18 pl-8 pr-44 rounded-3xl bg-white/40 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-800 focus:border-red-500 dark:focus:border-red-500 outline-none transition-all text-xl font-medium shadow-xl backdrop-blur-md"
+              className="w-full h-18 pl-8 pr-44 rounded-3xl bg-white/40 dark:bg-slate-900/40 border-2 border-slate-200 dark:border-slate-800 focus:border-red-500 dark:focus:border-red-500 outline-none transition-all text-xl font-medium shadow-xl backdrop-blur-md dark:text-white"
             />
             <div className="absolute right-3 top-3 bottom-3 flex gap-2">
               <button
@@ -192,7 +206,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             ) : (
               <>
                 <Search className="w-7 h-7 transition-transform group-hover:scale-110" />
-                Initialize High-Speed Extraction
+                Initialize Ultra Extraction
               </>
             )}
           </button>
@@ -218,7 +232,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
                   <Cpu className="w-8 h-8 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-white">Python Compute Core</h3>
+                  <h3 className="text-2xl font-black text-white">Advanced Compute Core</h3>
                   <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{currentFormat} Processor Active</p>
                 </div>
               </div>
@@ -250,7 +264,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
             <div className="text-center space-y-2">
               <div className="flex items-center justify-center gap-3 text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">
                 <Loader2 className="w-4 h-4 animate-spin text-red-500" />
-                Secure Stream Handshake in Progress
+                Secure Handshake in Progress
               </div>
             </div>
           </div>

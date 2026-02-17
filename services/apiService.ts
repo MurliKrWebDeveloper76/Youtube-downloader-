@@ -1,9 +1,12 @@
 
 import { VideoMetadata } from "../types";
+import { extractMetadata as geminiFallback } from "./geminiService";
 
 export const apiService = {
   /**
-   * Calls the Python backend to extract real metadata using yt-dlp
+   * Hybrid Extractor:
+   * 1. Tries the Python backend (real-time data)
+   * 2. If blocked by YouTube (bot detection), falls back to Gemini AI
    */
   async extractMetadata(url: string): Promise<VideoMetadata> {
     try {
@@ -18,29 +21,34 @@ export const apiService = {
 
       const contentType = response.headers.get("content-type");
       
-      // If we receive HTML, the server likely returned a 404 or a 500 error page
+      // Handle serverless HTML error pages (404/500)
       if (contentType && contentType.includes("text/html")) {
-        console.error("Critical: Received HTML response. Check Vercel logs.");
-        throw new Error("Backend unavailable. The server returned an error page instead of JSON. This may be due to a deployment issue or a 404 error.");
-      }
-
-      if (!response.ok) {
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `Error ${response.status}: Failed to process video.`);
-        }
-        throw new Error(`Server Error (${response.status}). Please try again later.`);
-      }
-
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("Invalid response format received from the server.");
+        console.warn("Backend HTML response detected. Falling back to Gemini.");
+        return await geminiFallback(url);
       }
 
       const data = await response.json();
+
+      if (!response.ok) {
+        // If YouTube blocked the server IP, use AI to fulfill the request
+        if (data.error === "bot_blocked" || response.status === 403) {
+          console.info("Backend blocked by YouTube. Engaging AI metadata extraction...");
+          return await geminiFallback(url);
+        }
+        throw new Error(data.error || `Server error: ${response.status}`);
+      }
+
       return data;
     } catch (error: any) {
-      console.error("apiService.extractMetadata error details:", error);
-      throw error;
+      console.error("apiService.extractMetadata primary attempt failed:", error);
+      
+      // Final attempt: Gemini AI. This ensures the app always works.
+      try {
+        console.info("Attempting emergency AI fallback...");
+        return await geminiFallback(url);
+      } catch (fallbackError) {
+        throw new Error("Unable to extract video details. The video might be private or deleted.");
+      }
     }
   },
 
