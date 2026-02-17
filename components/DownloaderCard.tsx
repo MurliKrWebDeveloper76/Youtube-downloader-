@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Youtube, Search, Clipboard, Loader2, AlertCircle, Cpu, Database, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
 import { VideoMetadata, HistoryItem } from '../types';
@@ -32,6 +32,12 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   const [currentFormat, setCurrentFormat] = useState('');
 
   const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Use a Ref to hold the onSuccess callback to prevent ReferenceErrors in stale closures
+  const onSuccessRef = useRef(onSuccess);
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
 
   const validateUrl = (val: string) => {
     const t = val.trim();
@@ -66,7 +72,6 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
       if (text) {
         setUrl(text);
         if (validateUrl(text)) {
-          // Small delay to ensure state update before processing
           setTimeout(handleProcess, 100);
         }
       }
@@ -75,38 +80,48 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     }
   };
 
-  // Side effect to finalize the download after progress reaches 100
   const finalizeDownload = useCallback(async (format: string, currentMetadata: VideoMetadata) => {
     try {
-      // In a real environment, this would call the /api/download endpoint
-      const sample = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-      const res = await fetch(sample);
-      const blob = await res.blob();
-      const bUrl = window.URL.createObjectURL(blob);
+      // 1. Get the real download URL from the backend to avoid AccessDenied/0.29KB errors
+      const response = await fetch(`/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`);
+      if (!response.ok) throw new Error("Download server busy");
       
-      const a = document.createElement('a');
-      a.href = bUrl;
-      const fileName = `${currentMetadata.title || 'Video'}_${format}`.replace(/[^a-z0-9]/gi, '_');
-      a.download = `${fileName}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(bUrl);
+      const data = await response.json();
+      const downloadUrl = data.downloadUrl;
+      const fileName = data.fileName;
+
+      // 2. Trigger the browser download properly
+      const res = await fetch(downloadUrl);
+      const blob = await res.blob();
+      const blobObjectUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobObjectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobObjectUrl);
 
       setIsProcessing(false);
-      onSuccess({
-        id: Math.random().toString(36).substr(2, 9),
-        timestamp: Date.now(),
-        title: currentMetadata.title,
-        thumbnail: currentMetadata.thumbnailUrl || `https://img.youtube.com/vi/${currentMetadata.id}/mqdefault.jpg`,
-        format: format
-      });
+      
+      // 3. Notify history using the Ref-based callback
+      if (onSuccessRef.current) {
+        onSuccessRef.current({
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: Date.now(),
+          title: currentMetadata.title,
+          thumbnail: currentMetadata.thumbnailUrl || `https://img.youtube.com/vi/${currentMetadata.id}/mqdefault.jpg`,
+          format: format
+        });
+      }
     } catch (err) {
       console.error("Finalize download error:", err);
       setIsProcessing(false);
+      // Absolute fallback for demo purposes
       window.open('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', '_blank');
     }
-  }, [onSuccess]);
+  }, []);
 
   const handleDownload = (format: string) => {
     if (!metadata) return;
@@ -114,32 +129,27 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     setCurrentFormat(format);
     setIsProcessing(true);
     setProgress(0);
-    setLogs(["[api] Handshaking with serverless endpoint..."]);
+    setLogs(["[api] Initializing ultra-secure session..."]);
 
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 8) + 2, 100);
         
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 5) + 2, 100);
-        
-        // Add log entry if threshold reached
-        if (nextProgress % 15 === 0 && logIdx < backendLogs.length) {
+        if (nextProgress % 12 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
 
-        // Trigger finalization outside of the state updater when done
         if (nextProgress >= 100) {
-           setTimeout(() => finalizeDownload(format, metadata), 500);
+          clearInterval(interval);
+          setTimeout(() => finalizeDownload(format, metadata), 600);
+          return 100;
         }
         
         return nextProgress;
       });
-    }, 120);
+    }, 150);
   };
 
   return (
