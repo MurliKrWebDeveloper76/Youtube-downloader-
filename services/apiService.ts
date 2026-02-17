@@ -3,13 +3,12 @@ import { extractMetadata as geminiFallback } from "./geminiService";
 
 export const apiService = {
   /**
-   * Hybrid Extractor:
-   * 1. Tries the Python backend (real-time data)
-   * 2. If blocked by YouTube (bot detection), falls back to Gemini AI
+   * Primary Extractor:
+   * Uses the unified Python backend at /api/video_info
    */
   async extractMetadata(url: string): Promise<VideoMetadata> {
     try {
-      const response = await fetch('/api/extract', {
+      const response = await fetch('/api/video_info', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -20,7 +19,6 @@ export const apiService = {
 
       const contentType = response.headers.get("content-type");
       
-      // Handle serverless HTML error pages (404/500)
       if (contentType && contentType.includes("text/html")) {
         console.warn("Backend HTML response detected. Falling back to Gemini.");
         return await geminiFallback(url);
@@ -30,7 +28,7 @@ export const apiService = {
 
       if (!response.ok) {
         // If YouTube blocked the server IP, use AI to fulfill the request
-        if (data.error === "bot_blocked" || response.status === 403) {
+        if (data.error && (data.error.includes("sign in") || data.error.includes("bot"))) {
           console.info("Backend blocked by YouTube. Engaging AI metadata extraction...");
           return await geminiFallback(url);
         }
@@ -41,7 +39,6 @@ export const apiService = {
     } catch (error: any) {
       console.error("apiService.extractMetadata primary attempt failed:", error);
       
-      // Final attempt: Gemini AI. This ensures the app always works.
       try {
         console.info("Attempting emergency AI fallback...");
         return await geminiFallback(url);
@@ -52,9 +49,9 @@ export const apiService = {
   },
 
   /**
-   * Generates a download URL for the unified backend
+   * Generates a download URL for the unified backend download pipe
    */
-  getDownloadUrl(videoId: string, format: string): string {
-    return `/api/download?id=${videoId}&format=${encodeURIComponent(format)}`;
+  getDownloadUrl(videoId: string, resolution: string, type: 'mp3' | 'mp4'): string {
+    return `/api/download?id=${videoId}&resolution=${encodeURIComponent(resolution)}&type=${type}`;
   }
 };
