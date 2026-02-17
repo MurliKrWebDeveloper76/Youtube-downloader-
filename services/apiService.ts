@@ -11,32 +11,35 @@ export const apiService = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify({ url }),
       });
 
       const contentType = response.headers.get("content-type");
       
+      // If we receive HTML, the server likely returned a 404 or a 500 error page
+      if (contentType && contentType.includes("text/html")) {
+        console.error("Critical: Received HTML response. Check Vercel logs.");
+        throw new Error("Backend unavailable. The server returned an error page instead of JSON. This may be due to a deployment issue or a 404 error.");
+      }
+
       if (!response.ok) {
         if (contentType && contentType.includes("application/json")) {
           const errorData = await response.json();
-          throw new Error(errorData.error || `Server error: ${response.status}`);
-        } else {
-          const text = await response.text();
-          console.error("Backend returned non-JSON error:", text);
-          throw new Error(`Backend Error (${response.status}): The server returned an unexpected response. This usually means the API route is missing or the backend failed.`);
+          throw new Error(errorData.error || `Error ${response.status}: Failed to process video.`);
         }
+        throw new Error(`Server Error (${response.status}). Please try again later.`);
       }
 
       if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        console.error("Expected JSON but got:", text);
-        throw new Error("Invalid response from server. Expected JSON metadata.");
+        throw new Error("Invalid response format received from the server.");
       }
 
-      return await response.json();
+      const data = await response.json();
+      return data;
     } catch (error: any) {
-      console.error("apiService.extractMetadata error:", error);
+      console.error("apiService.extractMetadata error details:", error);
       throw error;
     }
   },
