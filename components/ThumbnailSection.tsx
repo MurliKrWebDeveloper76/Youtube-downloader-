@@ -21,37 +21,40 @@ export const ThumbnailSection: React.FC<ThumbnailSectionProps> = ({ metadata }) 
     setDownloading(label);
     setError(null);
     try {
-      // Use a proxy-free method for public thumbnails where possible,
-      // or rely on standard fetch if headers are permissive.
-      const response = await fetch(url, { mode: 'no-cors' });
+      // First try to fetch the blob to force a real download
+      const response = await fetch(url).catch(() => null);
       
-      // Since no-cors gives opaque response, we try standard fetch first
-      const corsResponse = await fetch(url).catch(() => null);
-      
-      if (corsResponse && corsResponse.ok) {
-        const blob = await corsResponse.blob();
+      if (response && response.ok) {
+        const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = `yt-ultra-thumb-${metadata.id}-${label.toLowerCase()}.jpg`;
+        link.download = `YT_Ultra_Thumb_${metadata.id}_${label}.jpg`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(blobUrl);
       } else {
-        // If CORS fails, open in a way the user can save
-        const win = window.open(url, '_blank');
-        if (win) {
-          win.focus();
-        } else {
-          setError('Popup blocked. Click resolution to open.');
-        }
+        // Fallback: Use direct link with download attribute if fetch is blocked (CORS)
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = "_blank";
+        link.download = `thumbnail.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setError('Download initiated via browser handler.');
       }
     } catch (err) {
-      console.error('Download failed:', err);
-      setError('Download restricted by browser security.');
+      console.error('Thumbnail download failed:', err);
+      // Last resort: Open in new tab
+      window.open(url, '_blank');
+      setError('Check new tab to save image.');
     } finally {
-      setTimeout(() => setDownloading(null), 2000);
+      setTimeout(() => {
+        setDownloading(null);
+        setError(null);
+      }, 3000);
     }
   };
 
@@ -65,7 +68,7 @@ export const ThumbnailSection: React.FC<ThumbnailSectionProps> = ({ metadata }) 
           <h3 className="text-xl font-bold">HQ Thumbnails</h3>
         </div>
         {error && (
-          <div className="flex items-center gap-1 text-[10px] text-red-500 font-bold uppercase">
+          <div className="flex items-center gap-1 text-[9px] text-amber-500 font-bold uppercase animate-pulse">
             <AlertCircle className="w-3 h-3" />
             {error}
           </div>
@@ -84,6 +87,7 @@ export const ThumbnailSection: React.FC<ThumbnailSectionProps> = ({ metadata }) 
                   alt={r.label}
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                   onError={(e) => {
+                    // Fallback to hqdefault if maxres isn't available
                     if (r.suffix === 'maxresdefault') {
                       (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${metadata.id}/hqdefault.jpg`;
                     }
@@ -96,6 +100,7 @@ export const ThumbnailSection: React.FC<ThumbnailSectionProps> = ({ metadata }) 
                   onClick={() => triggerDownload(r.label, imgUrl)}
                   disabled={isDownloading}
                   className="p-1.5 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-500 rounded-lg transition-all active:scale-90 disabled:opacity-50"
+                  title={`Download ${r.label}`}
                 >
                   {isDownloading ? (
                     <Loader2 className="w-3 h-3 animate-spin" />
@@ -109,7 +114,7 @@ export const ThumbnailSection: React.FC<ThumbnailSectionProps> = ({ metadata }) 
         })}
       </div>
       <p className="mt-4 text-[10px] text-slate-400 font-medium text-center italic">
-        *If download doesn't start, thumbnail will open in a new tab.
+        *Full HD thumbnails may take a few seconds to initialize.
       </p>
     </div>
   );
