@@ -1,6 +1,7 @@
 import os
+import subprocess
+import json
 import requests
-import yt_dlp
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 
@@ -17,6 +18,10 @@ BROWSER_HEADERS = {
     'Upgrade-Insecure-Requests': '1',
 }
 
+def get_yt_dlp_binary():
+    # Attempt to find yt-dlp binary
+    return "yt-dlp"
+
 @app.route('/api/video_info', methods=['POST', 'OPTIONS'])
 def video_info():
     if request.method == 'OPTIONS':
@@ -28,34 +33,31 @@ def video_info():
             return jsonify({"error": "YouTube URL is required."}), 400
             
         url = data['url']
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'noplaylist': True,
-            'user_agent': BROWSER_HEADERS['User-Agent'],
-            'socket_timeout': 5,
-        }
+        cmd = [
+            get_yt_dlp_binary(),
+            '--quiet',
+            '--no-warnings',
+            '--nocheckcertificate',
+            '--dump-json',
+            '--no-playlist',
+            url
+        ]
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                return jsonify({"error": "Video not found."}), 404
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return jsonify({"error": "Could not extract video info. Video might be restricted or blocked."}), 400
             
-            # Extract basic info
-            metadata = {
-                "id": info.get('id'),
-                "title": info.get('title'),
-                "author": info.get('uploader') or info.get('channel', 'Unknown'),
-                "duration": f"{info.get('duration', 0) // 60}:{info.get('duration', 0) % 60:02d}",
-                "views": f"{info.get('view_count', 0):,}",
-                "description": info.get('description', '')[:200] + '...',
-                "thumbnailUrl": info.get('thumbnail'),
-                "publish_date": info.get('upload_date', 'Unknown'),
-                "url": url
-            }
-            
-            return jsonify(metadata)
+        info = json.loads(result.stdout)
+        
+        return jsonify({
+            "id": info.get('id'),
+            "title": info.get('title'),
+            "author": info.get('uploader') or info.get('channel', 'Unknown'),
+            "duration": f"{info.get('duration', 0) // 60}:{info.get('duration', 0) % 60:02d}",
+            "views": f"{info.get('view_count', 0):,}",
+            "thumbnailUrl": info.get('thumbnail'),
+            "url": url
+        })
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -68,90 +70,98 @@ def available_resolutions():
         if not url:
             return jsonify({"error": "URL required"}), 400
             
-        ydl_opts = {
-            'quiet': True,
-            'nocheckcertificate': True,
-            'user_agent': BROWSER_HEADERS['User-Agent'],
-        }
+        cmd = [
+            get_yt_dlp_binary(),
+            '--quiet',
+            '--dump-json',
+            url
+        ]
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = info.get('formats', [])
-            
-            # Filter for common progressive mp4 resolutions
-            res_set = set()
-            for f in formats:
-                if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('ext') == 'mp4':
-                    res = f.get('resolution') or f"{f.get('height')}p"
-                    if 'p' in str(res):
-                        res_set.add(str(res))
-            
-            return jsonify({
-                "progressive": sorted(list(res_set), key=lambda x: int(x.replace('p', '')) if x.replace('p', '').isdigit() else 0),
-                "audio": ["128kbps", "192kbps", "320kbps"]
-            })
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        info = json.loads(result.stdout)
+        formats = info.get('formats', [])
+        
+        # We look for progressive formats (video + audio in one file) 
+        # because Vercel doesn't have ffmpeg to merge separate streams.
+        res_set = set()
+        for f in formats:
+            if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('ext') == 'mp4':
+                res = f.get('height')
+                if res:
+                    res_set.add(f"{res}p")
+        
+        return jsonify({
+            "progressive": sorted(list(res_set), key=lambda x: int(x.replace('p', ''))),
+            "audio": ["128kbps", "192kbps", "320kbps"]
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download')
 def download():
+    """
+    ULTRA DIRECT PIPE:
+    Streams binary data directly from yt-dlp stdout to the response.
+    Forces application/octet-stream to prevent browser media players from hijacking.
+    """
     video_id = request.args.get('id')
-    res_req = request.args.get('resolution', 'best')
-    format_type = request.args.get('type', 'mp4') # mp4 or mp3
+    res_req = request.args.get('resolution', '720p')
+    format_type = request.args.get('type', 'mp4')
     
     if not video_id:
         return "Video ID required", 400
 
     video_url = f"https://www.youtube.com/watch?v={video_id}"
+    height = res_req.replace('p', '')
     
+    # Select best progressive mp4 up to requested height
+    # If mp3, select best audio
+    if format_type == 'mp3':
+        format_spec = 'bestaudio/best'
+    else:
+        format_spec = f'best[height<={height}][ext=mp4]/best'
+
+    def generate():
+        cmd = [
+            get_yt_dlp_binary(),
+            '-f', format_spec,
+            '--no-playlist',
+            '--no-warnings',
+            '--nocheckcertificate',
+            '-o', '-',  # Output to stdout
+            video_url
+        ]
+        
+        # Use Popen to pipe stdout directly
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        try:
+            while True:
+                chunk = proc.stdout.read(1024 * 512) # 512KB chunks
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            proc.terminate()
+
+    # Get title for filename
     try:
-        # Configuration for streaming
-        ydl_opts = {
-            'format': f'bestvideo[height<={res_req[:-1]}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' if format_type == 'mp4' else 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-            'user_agent': BROWSER_HEADERS['User-Agent'],
-            'socket_timeout': 10,
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            stream_url = info.get('url')
-            title = info.get('title', 'video').replace(' ', '_')
-            
-        if not stream_url:
-            raise Exception("Stream URL not found")
+        title_cmd = [get_yt_dlp_binary(), '--get-title', '--no-playlist', video_url]
+        title = subprocess.check_output(title_cmd).decode('utf-8').strip()
+    except:
+        title = "video"
 
-        resp = requests.get(stream_url, stream=True, headers=BROWSER_HEADERS, timeout=10)
-        resp.raise_for_status()
+    safe_title = "".join([c for c in title if c.isalnum() or c in ('-', '_')])[:50]
+    filename = f"YT_Ultra_{safe_title}.{format_type}"
 
-        def stream_content():
-            for chunk in resp.iter_content(chunk_size=524288): # 512KB chunks
-                if chunk:
-                    yield chunk
+    headers = {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': f'attachment; filename="{filename}"',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-cache',
+    }
 
-        safe_title = "".join([c for c in title if c.isalnum() or c in ('-', '_')])[:50]
-        filename = f"YT_Ultra_{safe_title}.{format_type}"
-
-        # FORCED DOWNLOAD HEADERS
-        headers = {
-            'Content-Type': 'application/octet-stream',
-            'Content-Disposition': f'attachment; filename="{filename}"',
-            'Content-Transfer-Encoding': 'binary',
-            'X-Content-Type-Options': 'nosniff',
-            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-        }
-        
-        if resp.headers.get('Content-Length'):
-            headers['Content-Length'] = resp.headers.get('Content-Length')
-
-        return Response(stream_with_context(stream_content()), headers=headers)
-
-    except Exception as e:
-        return f"Download server error: {str(e)}", 500
+    return Response(stream_with_context(generate()), headers=headers)
 
 if __name__ == "__main__":
     app.run(port=5000)
