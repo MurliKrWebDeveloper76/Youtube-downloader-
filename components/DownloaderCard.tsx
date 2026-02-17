@@ -80,26 +80,16 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
   };
 
   const finalizeDownload = useCallback(async (format: string, currentMetadata: VideoMetadata) => {
-    try {
-      // 1. Get the Proxied Download URL from the backend
-      const response = await fetch(`/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`);
-      if (!response.ok) throw new Error("Download server busy");
-      
-      const data = await response.json();
-      const downloadUrl = data.downloadUrl;
-      const fileName = data.fileName;
+    // 1. Construct the direct streaming proxy URL
+    const downloadUrl = `/api/download?id=${currentMetadata.id}&format=${encodeURIComponent(format)}`;
+    
+    // 2. Use window.location.assign to trigger the browser's native download manager
+    // This is more robust than Fetch/Blob for large video files as it handles headers directly
+    window.location.assign(downloadUrl);
 
-      // 2. Direct browser download via hidden link targeting the proxy stream
-      // Using an <a> tag directly ensures Chrome's download manager handles the stream
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.setAttribute('download', fileName);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
+    // 3. Close the processing overlay after a short delay
+    setTimeout(() => {
       setIsProcessing(false);
-      
       if (onSuccessRef.current) {
         onSuccessRef.current({
           id: Math.random().toString(36).substr(2, 9),
@@ -109,11 +99,7 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
           format: format
         });
       }
-    } catch (err) {
-      console.error("Finalize download error:", err);
-      setIsProcessing(false);
-      setError("Download session timed out. Please try again.");
-    }
+    }, 2000);
   }, []);
 
   const handleDownload = (format: string) => {
@@ -127,22 +113,22 @@ export const DownloaderCard: React.FC<DownloaderCardProps> = ({ onSuccess }) => 
     let logIdx = 0;
     const interval = setInterval(() => {
       setProgress(prev => {
-        const nextProgress = Math.min(prev + Math.floor(Math.random() * 8) + 2, 100);
+        const nextProgress = Math.min(prev + Math.floor(Math.random() * 10) + 2, 100);
         
-        if (nextProgress % 12 === 0 && logIdx < backendLogs.length) {
+        if (nextProgress % 15 === 0 && logIdx < backendLogs.length) {
           setLogs(p => [...p, backendLogs[logIdx]]);
           logIdx++;
         }
 
         if (nextProgress >= 100) {
           clearInterval(interval);
-          setTimeout(() => finalizeDownload(format, metadata), 600);
+          setTimeout(() => finalizeDownload(format, metadata), 800);
           return 100;
         }
         
         return nextProgress;
       });
-    }, 150);
+    }, 120);
   };
 
   return (

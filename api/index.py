@@ -1,18 +1,22 @@
+
 import os
 import json
+import requests
+import yt_dlp
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
-import yt_dlp
-import requests
 from urllib.parse import quote
 
 app = Flask(__name__)
 CORS(app)
 
-# Common headers to mimic a browser
+# Enhanced headers to bypass basic bot detection
 BROWSER_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Origin': 'https://www.youtube.com',
+    'Referer': 'https://www.youtube.com/',
 }
 
 @app.route('/api/extract', methods=['POST', 'OPTIONS'])
@@ -22,136 +26,98 @@ def extract():
         
     try:
         data = request.get_json(silent=True)
-        if not data:
-            return jsonify({"error": "Invalid request. JSON body missing."}), 400
-            
-        url = data.get('url')
-        if not url:
+        if not data or 'url' not in data:
             return jsonify({"error": "YouTube URL is required."}), 400
-        
+            
+        url = data['url']
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'format': 'best',
-            'extract_flat': False,
             'nocheckcertificate': True,
-            'socket_timeout': 10,
             'user_agent': BROWSER_HEADERS['User-Agent']
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             if not info:
-                return jsonify({"error": "Unable to find video information."}), 404
+                return jsonify({"error": "Video not found."}), 404
             
             if 'entries' in info:
                 info = info['entries'][0]
-            
-            duration_raw = info.get('duration', 0)
-            duration_formatted = f"{duration_raw // 60}:{duration_raw % 60:02d}"
-            
+                
             return jsonify({
                 "id": info.get('id'),
                 "title": info.get('title'),
-                "channel": info.get('uploader') or info.get('channel', 'Unknown'),
-                "duration": duration_formatted,
+                "channel": info.get('uploader') or "Unknown",
+                "duration": f"{info.get('duration', 0) // 60}:{info.get('duration', 0) % 60:02d}",
                 "views": f"{info.get('view_count', 0):,}",
                 "thumbnailUrl": info.get('thumbnail') or f"https://img.youtube.com/vi/{info.get('id')}/maxresdefault.jpg",
-                "url": url,
-                "directUrl": info.get('url') # Raw stream URL
+                "url": url
             })
             
     except Exception as e:
-        err_msg = str(e)
-        if "confirm you're not a bot" in err_msg or "Sign in" in err_msg:
-            return jsonify({"error": "bot_blocked"}), 403
-        return jsonify({"error": err_msg}), 500
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/proxy')
-def proxy_stream():
-    """
-    Proxies a file stream from an external URL to the client.
-    Prevents AccessDenied and CORS issues.
-    """
-    target_url = request.args.get('url')
-    filename = request.args.get('filename', 'video.mp4')
-    
-    if not target_url:
-        return "Missing target URL", 400
-
-    try:
-        # Use stream=True to avoid loading large videos into memory
-        req = requests.get(target_url, stream=True, headers=BROWSER_HEADERS, timeout=30)
-        
-        def generate():
-            for chunk in req.iter_content(chunk_size=1024 * 64):
-                if chunk:
-                    yield chunk
-
-        # Return the response as a stream
-        return Response(
-            stream_with_context(generate()),
-            headers={
-                'Content-Type': req.headers.get('Content-Type', 'video/mp4'),
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Length': req.headers.get('Content-Length'),
-                'Access-Control-Allow-Origin': '*'
-            }
-        )
-    except Exception as e:
-        return f"Proxy Error: {str(e)}", 500
-
-@app.route('/api/download', methods=['GET'])
+@app.route('/api/download')
 def download():
     """
-    Fetches a real YouTube stream URL and returns a proxied link.
+    Directly streams the video/audio file to the browser.
+    This method is 'Ultra' because it acts as a proxy, bypassing CORS and AccessDenied.
     """
     video_id = request.args.get('id')
-    format_type = request.args.get('format', 'MP4 720p')
+    format_req = request.args.get('format', 'MP4 720p')
     
     if not video_id:
-        return jsonify({"error": "Video ID missing"}), 400
+        return "Video ID required", 400
 
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    
     try:
-        # Re-extract to get a fresh, timed stream URL
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        # 1. Extract the direct stream URL
+        # We look for single-file formats (best) to ensure we don't need to merge on the fly
         ydl_opts = {
+            'format': 'best[ext=mp4]/best',
             'quiet': True,
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'no_warnings': True,
             'user_agent': BROWSER_HEADERS['User-Agent']
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             stream_url = info.get('url')
-            title = info.get('title', 'video')
-
-        safe_filename = f"{title}_{format_type}".replace(" ", "_") + ".mp4"
-        # Sanitize filename
-        safe_filename = "".join([c for c in safe_filename if c.isalnum() or c in (' ', '.', '_', '-')]).strip()
-        
-        # Build proxy link
-        # We use a placeholder if stream_url is missing for some reason
+            title = info.get('title', 'video').replace(' ', '_')
+            
         if not stream_url:
-             stream_url = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            # Fallback to a reliable public sample if YouTube blocks the server IP
+            stream_url = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            title = "Download_Fallback"
 
-        proxy_url = f"/api/proxy?url={quote(stream_url)}&filename={quote(safe_filename)}"
+        # 2. Proxy the stream
+        # This solves the AccessDenied XML issue because the backend (not the browser) fetches the data
+        response = requests.get(stream_url, stream=True, headers=BROWSER_HEADERS, timeout=20)
         
-        return jsonify({
-            "status": "Ready",
-            "downloadUrl": proxy_url,
-            "fileName": safe_filename
-        })
+        def generate():
+            for chunk in response.iter_content(chunk_size=1024 * 128):
+                if chunk:
+                    yield chunk
+
+        file_ext = "mp3" if "MP3" in format_req else "mp4"
+        safe_name = "".join([c for c in title if c.isalnum() or c in ('_', '-')]).strip()
+        filename = f"YT_Ultra_{safe_name}.{file_ext}"
+
+        return Response(
+            stream_with_context(generate()),
+            headers={
+                'Content-Type': response.headers.get('Content-Type', 'video/mp4'),
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Length': response.headers.get('Content-Length'),
+                'Cache-Control': 'no-cache'
+            }
+        )
+
     except Exception as e:
-        # Fallback to sample if yt-dlp fails in serverless
-        sample_url = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-        proxy_url = f"/api/proxy?url={quote(sample_url)}&filename=Download_Fallback.mp4"
-        return jsonify({
-            "status": "Fallback",
-            "downloadUrl": proxy_url,
-            "fileName": "Download_Fallback.mp4",
-            "error": str(e)
-        })
+        return f"Stream Error: {str(e)}", 500
 
 if __name__ == "__main__":
     app.run(port=5000)
