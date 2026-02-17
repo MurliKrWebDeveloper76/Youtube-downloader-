@@ -1,4 +1,3 @@
-
 export interface VideoMetadata {
   id: string;
   title: string;
@@ -7,6 +6,7 @@ export interface VideoMetadata {
   thumbnailUrl: string;
   views: string;
   url: string;
+  directUrl?: string;
 }
 
 export interface Format {
