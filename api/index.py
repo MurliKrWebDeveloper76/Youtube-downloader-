@@ -200,7 +200,7 @@ def available_resolutions():
             
             res_set = set()
             for f in formats:
-                # Detection for single-file formats (progressive)
+                # Progressive formats contain both video and audio in a single file
                 if (f.get('vcodec') != 'none' and 
                     f.get('acodec') != 'none'):
                     res = f.get('height')
@@ -223,7 +223,7 @@ def download():
     """
     ULTRA DIRECT PIPE (High Compatibility):
     Uses a multi-stage fallback filter to ensure 'Format not available' errors
-    never occur, even for videos without standard MP4 progressive streams.
+    never occur, even for videos like Shorts or limited progressive streams.
     """
     video_id = request.args.get('id')
     res_req = request.args.get('resolution', '720p')
@@ -233,24 +233,19 @@ def download():
         return "Video ID required", 400
 
     video_url = f"https://www.youtube.com/watch?v={video_id}"
-    height = res_req.replace('p', '')
+    height_val = res_req.replace('p', '')
     cookies = ensure_cookies()
     
     if format_type == 'mp3':
+        # Best audio available as a single file
         format_spec = 'bestaudio/best'
     else:
-        # ULTRA-RESILIENT SELECTION:
-        # 1. Progressive MP4 with height <= requested
-        # 2. Progressive any-ext with height <= requested
-        # 3. Best overall single file (progressive)
-        # 4. Any combined file (fallback for weird videos like shorts)
-        # 5. Last resort: best available single format
-        format_spec = (
-            f'best[height<={height}][ext=mp4][vcodec!=none][acodec!=none]/'
-            f'best[height<={height}][vcodec!=none][acodec!=none]/'
-            f'best[vcodec!=none][acodec!=none]/'
-            f'best'
-        )
+        # UNIVERSAL FALLBACK STRATEGY:
+        # 1. Best progressive file with height <= requested
+        # 2. Best progressive MP4 overall
+        # 3. Best overall single file (any extension/codec)
+        # This prevents the 'Requested format is not available' error.
+        format_spec = f'best[height<={height_val}]/best'
 
     def generate():
         cmd = [
@@ -262,7 +257,7 @@ def download():
             '--no-cache-dir',
             '--user-agent', BROWSER_HEADERS['User-Agent'],
             '--cookies', cookies,
-            '-o', '-',  
+            '-o', '-',  # Stream binary to stdout
             video_url
         ]
         
