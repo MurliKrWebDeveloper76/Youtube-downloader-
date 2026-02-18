@@ -9,7 +9,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# The cookies provided by the user
+# The cookies provided by the user to bypass bot detection
 COOKIES_CONTENT = """# Netscape HTTP Cookie File
 # http://curl.haxx.se/rfc/cookie_spec.html
 # This is a generated file!  Do not edit.
@@ -110,12 +110,11 @@ www.youtube.com	FALSE	/	FALSE	1794558167	QUESTION_AI_PCUID	p3in6hi1zzuwn94v18mfj
 .youtube.com	TRUE	/	TRUE	1805887864	__Secure-3PSID	g.a0006wgVK1CeJww2lSzIqrU5udbYCIdpqOX5KSoKHwcOKhf32tE-LFRLSlHAdiyHMiqriwwL_wACgYKARUSARYSFQHGX2Mi3Sn9imWfD_9TEJgdLEqUHhoVAUF8yKrcJSCWuw-Te2Nvn0RYOkhY0076
 .youtube.com	TRUE	/	TRUE	1802863865	__Secure-1PSIDTS	sidts-CjQBBj1CYl4D1r1JIKNALiqSk7y5babZkdkL0UAihnuQ8-AyP_o9CH0G16LV3bPJquZK4ecIEAA
 .youtube.com	TRUE	/	TRUE	1802863865	__Secure-3PSIDTS	sidts-CjQBBj1CYl4D1r1JIKNALiqSk7y5babZkdkL0UAihnuQ8-AyP_o9CH0G16LV3bPJquZK4ecIEAA
-.youtube.com	TRUE	/	TRUE	1805887864	LOGIN_INFO	AFmmF2swRQIgaSzAg7cwcuAd0G8jbCFIkmWPbnp6RtdKR_gr9dVrZJcCIQDThZwMT-E8F5NEAcxZ5LBI0EPe2e-FqeooOAcSjF2wMA:QUQ3MjNmd0NLVEp1eF9GVjFZRlFCaGpuaHJ0ZHNFSzA1dUJJZ1RVQWw3Ni1FeUF5V3BzOWwzMGJSMGhQWjRULUNVbjFuR2ZYUGxtdzZ2TW9ZMTc5UXZsdE9TVHRycVN5YVBNTzM1OWpvRWVaSVlFZV9HakJieEJ1ZWNEYmlMMG4xUHFpUFFUTGZYN0FkUjI4STEtanFpT3p2TFEzUUJ3XzVR
+.youtube.com	TRUE	/	TRUE	1805887864	LOGIN_INFO	AFmmF2swRQIgaSzAg7cwcuAd0G8jbCFIkmWPbnp6RtdKR_gr9dVrZJcCIQDThZwMT-E8F5NEAcxZ5LBI0EPe2e-FqeooOAcSjF2wMA:QUQ3MjNmd0NLVEp1eF9GVjFZRlFCaGpuaHJ0ZHNFSzA1dUJJZ1RVQWw3Ni1FeUF5V3BzOWwzMGJSMGhQWjRULUNVbjFuR2ZYUGxtdzZ2TW9ZMTc5UXZsdE9TVHRycVN5YVBNTzM1OWpvRWVaSVlFZV9HakJieEJ1ZWNEYmlNMG4xUHFpUFFUTGZYN0FkUjI4STEtanFpT3p2TFEzUUJ3XzVR
 .youtube.com	TRUE	/	FALSE	1802863885	SIDCC	AKEyXzW9Rob32cJYKaAz4aosjt9JNbJ1sTQD_b83JYlLdYnqCk1T-NVUxRi9H1xQfMcXZp4aSA
 .youtube.com	TRUE	/	TRUE	1802863885	__Secure-1PSIDCC	AKEyXzUv-rlGxLj6zzmuYJyLivhwSTuiF9yxYhMkfhSPT1_YBCjp2BpW35YkX0eGCr6ZSb6v
 .youtube.com	TRUE	/	TRUE	1802863885	__Secure-3PSIDCC	AKEyXzXEWg5zZo8lwM_hOFZrfyyZUW1oZIlN7cxlUTArbymXhVPs4tofHKOXBVLHKSNXZN_PCQ"""
 
-# Writable location for cookies on Vercel
 TEMP_COOKIES_PATH = '/tmp/cookies.txt'
 
 def ensure_cookies():
@@ -241,18 +240,17 @@ def download():
         format_spec = 'bestaudio/best'
     else:
         # ULTRA-RESILIENT SELECTION:
-        # 1. Best combined file with ext=mp4 AND height <= requested
-        # 2. Best combined file with height <= requested (even if webm)
-        # 3. Best overall combined file (progressive)
-        # 4. Any combined file (fallback for weird videos like SW7ZHajqfW4)
-        # 5. The absolute best single format available
+        # 1. Progressive MP4 with height <= requested
+        # 2. Progressive any-ext with height <= requested
+        # 3. Best overall single file (progressive)
+        # 4. Any combined file (fallback for weird videos like shorts)
+        # 5. Last resort: best available single format
         format_spec = (
-            f'best[height<={height}][ext=mp4]/'
-            f'best[height<={height}]/'
-            f'best[ext=mp4]/'
-            f'best/'
-            f'bestvideo+bestaudio/best' # Last resort (may fail if merging is required, but keeps yt-dlp happy)
-        ).replace('+', '/') # Final safety: swap + for / if somehow it ends up there
+            f'best[height<={height}][ext=mp4][vcodec!=none][acodec!=none]/'
+            f'best[height<={height}][vcodec!=none][acodec!=none]/'
+            f'best[vcodec!=none][acodec!=none]/'
+            f'best'
+        )
 
     def generate():
         cmd = [
